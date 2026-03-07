@@ -120,6 +120,31 @@ with st.spinner("Probing endpoints..."):
             },
         )
 
+    # ── 9-12. FGA probes — test FGA rules locally (no proxy round-trip, no ShieldBot trigger)
+    # We import the FGA engine directly and run checks in-process.
+    try:
+        from fga import check_fga as _check_fga
+
+        fga_tests = [
+            ("fga:cmd git status", "get:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"command": "git status"}}),
+            ("fga:cmd rm -rf", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"command": "rm -rf /"}}),
+            ("fga:path .env", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"path": ".env"}}),
+            ("fga:path ~/.ssh", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"path": "~/.ssh/id_rsa"}}),
+            ("fga:cmd sudo", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"command": "sudo rm -rf"}}),
+            ("fga:GET /health", "get:health", {"method": "GET", "path": "/health", "body": {}}),
+            ("fga:POST /shieldclaw/agents", "post:shieldclaw", {"method": "POST", "path": "/shieldclaw/agents", "body": {"agent_name": "test"}}),
+            ("fga:cmd git push --force", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"command": "git push --force"}}),
+        ]
+        for label, action_type, payload in fga_tests:
+            t0 = time.time()
+            result = _check_fga("dev-agent", action_type, payload)
+            lat = (time.time() - t0) * 1000
+            status = "ok" if result.allowed else f"denied:{result.rule_type}"
+            detail = result.reason[:200]
+            record_event("FGA", label, status, lat, detail)
+    except ImportError:
+        record_event("FGA", "fga-import", "error", 0, "Could not import fga module")
+
 # ── Build DataFrame ──────────────────────────────────────────────────────────
 
 df = pd.DataFrame(st.session_state.event_history)
@@ -258,6 +283,62 @@ fig_area.update_layout(
     font=dict(color="white"),
 )
 st.plotly_chart(fig_area, use_container_width=True)
+
+# ── FGA (Fine-Grained Authorization) ─────────────────────────────────────────
+
+fga_df = df[df["category"] == "FGA"]
+if not fga_df.empty:
+    st.header("FGA — Fine-Grained Authorization")
+    st.caption("FGA runs on every agent request after Auth0 JWT verification. Deny rules block before OpenClaw sees the request.")
+
+    fga_ok = len(fga_df[fga_df["color_status"] == "ok"])
+    fga_blocked = len(fga_df[fga_df["color_status"] == "failed"])
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("FGA Checks", len(fga_df))
+    col2.metric("Allowed", fga_ok)
+    col3.metric("Blocked", fga_blocked)
+
+    # Scatter: FGA checks over time
+    fig_fga_scatter = px.scatter(
+        fga_df,
+        x="timestamp",
+        y="endpoint",
+        color="color_status",
+        color_discrete_map=scatter_colors,
+        size="latency_ms",
+        size_max=18,
+        hover_data=["status", "latency_ms", "detail"],
+        title="FGA Checks Over Time (green = allowed, red = denied)",
+        height=400,
+    )
+    fig_fga_scatter.update_traces(marker=dict(line=dict(width=1, color="white")))
+    fig_fga_scatter.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="white"),
+    )
+    st.plotly_chart(fig_fga_scatter, use_container_width=True)
+
+    # Bar: FGA allow vs deny per endpoint
+    fga_counts = fga_df.groupby(["endpoint", "color_status"]).size().reset_index(name="count")
+    fig_fga_bar = px.bar(
+        fga_counts,
+        x="endpoint",
+        y="count",
+        color="color_status",
+        color_discrete_map=scatter_colors,
+        title="FGA Verdicts by Endpoint",
+        barmode="group",
+        height=400,
+    )
+    fig_fga_bar.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="white"),
+        xaxis_tickangle=-35,
+    )
+    st.plotly_chart(fig_fga_bar, use_container_width=True)
 
 # ── 5. Failure Drill-down ───────────────────────────────────────────────────
 
