@@ -16,6 +16,8 @@ from jose import jwt, JWTError
 from agent_identity import AgentRegistry, AgentRegistration, Auth0ManagementClient
 from data_policy import redact_response, get_data_policy_summary, SENSITIVE_PATTERNS
 from policy_parser import parse_policy
+from vault import vault
+from fga import check_fga
 from jacob.shieldbot import evaluate, ActionRequest
 from jacob.shieldbot import logger as shieldbot_logger
 from jacob.shieldbot import config as shieldbot_config
@@ -70,12 +72,12 @@ _maybe_register_and_exit()
 
 # --- Config ---
 
-AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
-AUTH0_CLIENT_ID = os.getenv("AUTH0_CLIENT_ID")
-AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
+AUTH0_DOMAIN = vault.get("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
+AUTH0_CLIENT_ID = vault.get("AUTH0_CLIENT_ID")
+AUTH0_AUDIENCE = vault.get("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
 AUTH0_ALGORITHMS = ["RS256"]
-OPENCLAW_UPSTREAM = os.getenv("OPENCLAW_UPSTREAM", "http://127.0.0.1:18789")
-SHIELDCLAW_PORT = int(os.getenv("SHIELDCLAW_PORT", "8443"))
+OPENCLAW_UPSTREAM = vault.get("OPENCLAW_UPSTREAM", "http://127.0.0.1:18789")
+SHIELDCLAW_PORT = int(vault.get("SHIELDCLAW_PORT", "8443"))
 
 JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
 ISSUER = f"https://{AUTH0_DOMAIN}/"
@@ -965,6 +967,23 @@ async def proxy(request: Request, path: str):
     if scope_error:
         log_request(identity, token_scopes, request.method, request_path, 403)
         raise HTTPException(status_code=403, detail=scope_error)
+
+    # --- FGA Policy Check (agents only) ---
+    if identity["is_agent"]:
+        agent_id = identity.get("agent_id", "unknown")
+        body = await request.body()
+        try:
+            body_dict = json.loads(body) if body else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            body_dict = {}
+
+        fga_payload = {"method": request.method, "path": request_path, "body": body_dict}
+        action_type = f"{request.method.lower()}:{request_path.strip('/').split('/')[1] if '/' in request_path.strip('/') else request_path.strip('/')}"
+
+        fga_result = check_fga(agent_id, action_type, fga_payload)
+        if not fga_result.allowed:
+            log_request(identity, token_scopes, request.method, request_path, 403)
+            raise HTTPException(status_code=403, detail=fga_result.reason)
 
     # --- ShieldBot Evaluation (agents only) ---
     if identity["is_agent"]:

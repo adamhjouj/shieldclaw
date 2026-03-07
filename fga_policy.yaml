@@ -1,0 +1,230 @@
+# ShieldClaw FGA Policy — Default (applies to all agents unless overridden)
+#
+# Rule evaluation order:
+#   1. deny rules  — checked first, any match = hard block
+#   2. allow rules — checked second, first match = permit
+#   3. no match    — default deny (nothing gets through without an explicit allow)
+#
+# To create a per-agent override: copy this file to fga_policy_{agent_id}.yaml
+# Rules support these matchers (all are optional, multiple matchers AND together):
+#   path_prefix:  filesystem or URL path the agent is touching
+#   command:      substring match against action_type or body command/cmd fields
+#   method:       HTTP method (GET, POST, PUT, DELETE, PATCH)
+#   route_prefix: OpenClaw API route prefix
+#   action_type:  regex match against the full action_type string
+#   reason:       human-readable explanation shown in the 403 response
+
+agent: default
+
+# ---------------------------------------------------------------------------
+# DENY — these are hard blocked regardless of any allow rule
+# ---------------------------------------------------------------------------
+deny:
+  # --- Credential & secret files ---
+  - path_prefix: ~/.ssh
+    reason: "SSH keys are off-limits to agents"
+
+  - path_prefix: ~/.aws
+    reason: "AWS credentials are off-limits to agents"
+
+  - path_prefix: ~/.gnupg
+    reason: "GPG keys are off-limits to agents"
+
+  - path_prefix: ~/.config/gcloud
+    reason: "GCloud credentials are off-limits to agents"
+
+  - path_prefix: .env
+    reason: "Local .env files may contain secrets — agents cannot read them"
+
+  - path_prefix: ~/.env
+    reason: "Home .env file is off-limits to agents"
+
+  # --- Destructive git operations ---
+  - command: "git push --force"
+    reason: "Force push is too destructive for autonomous agent use"
+
+  - command: "git push -f"
+    reason: "Force push is too destructive for autonomous agent use"
+
+  - command: "git reset --hard"
+    reason: "Hard reset destroys uncommitted work — not permitted for agents"
+
+  - command: "git clean -f"
+    reason: "Force clean destroys untracked files — not permitted for agents"
+
+  - command: "git rebase -i"
+    reason: "Interactive rebase requires human judgment"
+
+  # --- Dangerous shell commands ---
+  - command: "rm -rf"
+    reason: "Recursive force delete is too destructive for agents"
+
+  - command: "rm -r"
+    reason: "Recursive delete requires explicit human approval"
+
+  - command: "sudo"
+    reason: "Privilege escalation is not permitted for agents"
+
+  - command: "chmod 777"
+    reason: "World-writable permissions are a security risk"
+
+  - command: "chown"
+    reason: "Ownership changes are not permitted for agents"
+
+  # --- Database destructive operations ---
+  - command: "drop table"
+    reason: "Dropping tables is irreversible — not permitted for agents"
+
+  - command: "drop database"
+    reason: "Dropping databases is irreversible — not permitted for agents"
+
+  - command: "truncate"
+    reason: "Truncating tables is irreversible without a backup"
+
+  - command: "delete from"
+    reason: "Mass deletes require human approval"
+
+  # --- Network / infrastructure ---
+  - command: "curl.*--upload-file"
+    reason: "Uploading files via curl is not permitted"
+
+  - command: "wget.*-O"
+    reason: "Writing wget output to files is restricted"
+
+  # --- ShieldClaw admin routes (agents cannot manage themselves) ---
+  - route_prefix: /shieldclaw/agents
+    method: POST
+    reason: "Agents cannot register new agents — admin only"
+
+  - route_prefix: /shieldclaw/agents
+    method: DELETE
+    reason: "Agents cannot delete agent registrations — admin only"
+
+  - route_prefix: /api/v1/admin
+    reason: "Admin API is off-limits to agents"
+
+  - route_prefix: /api/v1/config
+    reason: "Config API is off-limits to agents"
+
+# ---------------------------------------------------------------------------
+# ALLOW — permitted operations (checked after deny rules pass)
+# ---------------------------------------------------------------------------
+allow:
+  # --- Safe read operations ---
+  - command: "git status"
+    reason: "Read-only git operation"
+
+  - command: "git log"
+    reason: "Read-only git operation"
+
+  - command: "git diff"
+    reason: "Read-only git operation"
+
+  - command: "git show"
+    reason: "Read-only git operation"
+
+  - command: "git branch"
+    reason: "Read-only git operation"
+
+  - command: "git fetch"
+    reason: "Read-only network operation"
+
+  - command: "git pull"
+    reason: "Safe merge operation"
+
+  - command: "git push"
+    reason: "Normal push (non-force) is permitted"
+
+  - command: "git commit"
+    reason: "Committing changes is permitted"
+
+  - command: "git add"
+    reason: "Staging files is permitted"
+
+  - command: "git checkout"
+    reason: "Switching branches is permitted"
+
+  - command: "git stash"
+    reason: "Stashing changes is permitted"
+
+  # --- Safe shell commands ---
+  - command: "ls"
+    reason: "Directory listing is safe"
+
+  - command: "cat"
+    reason: "Reading file contents is safe"
+
+  - command: "grep"
+    reason: "Searching file contents is safe"
+
+  - command: "find"
+    reason: "Finding files is safe"
+
+  - command: "echo"
+    reason: "Printing text is safe"
+
+  - command: "pwd"
+    reason: "Printing working directory is safe"
+
+  - command: "which"
+    reason: "Finding binaries is safe"
+
+  - command: "env"
+    reason: "Listing environment is permitted (data policy handles redaction)"
+
+  - command: "python"
+    reason: "Running Python scripts is permitted"
+
+  - command: "node"
+    reason: "Running Node scripts is permitted"
+
+  - command: "npm"
+    reason: "npm commands are permitted"
+
+  - command: "pip"
+    reason: "pip commands are permitted"
+
+  - command: "mkdir"
+    reason: "Creating directories is permitted"
+
+  - command: "cp"
+    reason: "Copying files is permitted"
+
+  - command: "mv"
+    reason: "Moving/renaming files is permitted"
+
+  - command: "touch"
+    reason: "Creating empty files is permitted"
+
+  # --- Safe project paths ---
+  - path_prefix: ~/projects
+    reason: "Projects directory is the primary workspace"
+
+  - path_prefix: /tmp
+    reason: "Temp directory is safe for agent use"
+
+  # --- OpenClaw API routes ---
+  - route_prefix: /v1/chat
+    reason: "Chat completions are the primary agent use case"
+
+  - route_prefix: /v1/responses
+    reason: "Response streaming is permitted"
+
+  - route_prefix: /api/v1/hooks
+    reason: "Hook invocation is permitted"
+
+  - route_prefix: /api/v1/tools
+    reason: "Tool invocation is permitted"
+
+  - route_prefix: /health
+    reason: "Health checks are always permitted"
+
+  - route_prefix: /shieldclaw/whoami
+    reason: "Identity introspection is always permitted"
+
+  - route_prefix: /shieldclaw/backboard
+    reason: "Dashboard access is permitted"
+
+  # --- Generic read operations via HTTP method ---
+  - method: GET
+    reason: "GET requests are generally safe (read-only)"
