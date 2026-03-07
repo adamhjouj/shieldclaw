@@ -54,7 +54,8 @@ def get_config() -> dict:
 
 
 def get_db_path() -> str:
-    return "/Users/owner/Downloads/startup_ideas/shieldclaw/shieldbot.db"
+    import os
+    return os.getenv("SHIELDBOT_DB_PATH", os.path.join(os.path.dirname(__file__), "shieldbot.db"))
 
 
 def use_backboard() -> bool:
