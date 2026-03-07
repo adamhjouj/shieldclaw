@@ -1,0 +1,63 @@
+model
+  schema 1.1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ShieldClaw Authorization Model
+#
+# Types:
+#   user       — human users (Auth0 sub, e.g. "google-oauth2|123")
+#   agent      — AI agent identities (e.g. "agent_abc123def456")
+#   gateway    — the ShieldClaw API gateway itself (singleton: "gateway:main")
+#   agent_reg  — an agent registration resource
+#   thread     — a Backboard.io conversation thread
+#   memory     — a user's LTM memory profile
+#   file       — a file/directory accessible through the proxy
+#   approval   — a pending approval request
+#
+# Relations cascade: owner implies admin implies member implies viewer
+# ─────────────────────────────────────────────────────────────────────────────
+
+type user
+
+type agent
+
+type gateway
+  relations
+    define admin: [user]
+    define operator: [user, agent] or admin
+    define viewer: [user, agent] or operator
+
+type agent_reg
+  relations
+    define owner: [user]
+    define admin: [user] or owner
+    define viewer: [user, agent] or admin
+    define can_revoke: admin
+    define can_rotate: admin
+    define can_execute: [agent]
+
+type thread
+  relations
+    define owner: [user]
+    define participant: [user, agent] or owner
+    define viewer: [user, agent] or participant
+
+type memory
+  relations
+    define owner: [user]
+    define admin: [user] or owner
+    define viewer: [user] or admin
+
+type file
+  relations
+    define owner: [user]
+    define editor: [user, agent] or owner
+    define viewer: [user, agent] or editor
+    define can_delete: [user] or owner
+    define can_execute: [user, agent] or owner
+
+type approval
+  relations
+    define requester: [agent]
+    define resolver: [user]
+    define viewer: [user, agent] or resolver or requester

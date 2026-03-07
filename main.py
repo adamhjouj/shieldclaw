@@ -22,7 +22,14 @@ from agent_identity import AgentRegistry, AgentRegistration, Auth0ManagementClie
 from data_policy import redact_response, get_data_policy_summary, SENSITIVE_PATTERNS
 from policy_parser import parse_policy
 from vault import vault
-from fga import check_fga
+from fga import check_fga, check_fga_full
+from fga_client import (
+    grant_permission,
+    revoke_permission,
+    check_permission,
+    batch_grant,
+    list_relations,
+)
 from jacob.shieldbot import evaluate, ActionRequest
 from jacob.shieldbot import logger as shieldbot_logger
 from jacob.shieldbot import config as shieldbot_config
@@ -454,6 +461,15 @@ async def register_agent(request: Request):
 
     logger.info(f"Agent registered: {agent_id} ({agent_name}) by {identity['sub']}")
 
+    # Write FGA tuples: owner gets full control, agent gets execute permission
+    try:
+        await batch_grant([
+            {"user": f"user:{identity['sub']}", "relation": "owner", "object_type": "agent_reg", "object_id": agent_id},
+            {"user": f"agent:{agent_id}", "relation": "can_execute", "object_type": "agent_reg", "object_id": agent_id},
+        ])
+    except Exception as e:
+        logger.warning(f"FGA tuple write failed (non-fatal): {e}")
+
     response = {
         "agent_id": agent_id,
         "agent_name": agent_name,
@@ -516,6 +532,13 @@ async def revoke_agent(agent_id: str, request: Request):
     # Also delete the Auth0 M2M application
     await auth0_mgmt.delete_agent_application(agent["auth0_client_id"])
 
+    # Clean up FGA tuples
+    try:
+        await revoke_permission(f"user:{agent['owner_sub']}", "owner", "agent_reg", agent_id)
+        await revoke_permission(f"agent:{agent_id}", "can_execute", "agent_reg", agent_id)
+    except Exception as e:
+        logger.warning(f"FGA tuple cleanup failed (non-fatal): {e}")
+
     logger.info(f"Agent revoked: {agent_id} by {identity['sub']}")
     return {"status": "revoked", "agent_id": agent_id}
 
@@ -545,6 +568,119 @@ async def rotate_agent_secret(agent_id: str, request: Request):
         "client_secret": new_creds["client_secret"],
         "message": "Store the new client_secret securely. The old secret is now invalid.",
     }
+
+
+# --- FGA Admin Endpoints ---
+
+@app.post("/shieldclaw/fga/grant")
+async def fga_grant(request: Request):
+    """Grant an FGA permission. Requires gateway:admin scope.
+
+    Body: { "user": "user:auth0|xxx" or "agent:agent_xxx",
+            "relation": "owner",
+            "object_type": "agent_reg",
+            "object_id": "agent_abc123" }
+    """
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+
+    body = await request.json()
+    user = body.get("user")
+    relation = body.get("relation")
+    object_type = body.get("object_type")
+    object_id = body.get("object_id")
+
+    if not all([user, relation, object_type, object_id]):
+        raise HTTPException(status_code=400, detail="user, relation, object_type, object_id are all required")
+
+    ok = await grant_permission(user, relation, object_type, object_id)
+    if not ok:
+        raise HTTPException(status_code=502, detail="FGA grant failed — check server logs")
+
+    logger.info(f"FGA GRANT: {user} {relation} {object_type}:{object_id}")
+    return {"status": "granted", "user": user, "relation": relation, "object": f"{object_type}:{object_id}"}
+
+
+@app.post("/shieldclaw/fga/revoke")
+async def fga_revoke(request: Request):
+    """Revoke an FGA permission. Requires gateway:admin scope.
+
+    Body: { "user": "user:auth0|xxx",
+            "relation": "owner",
+            "object_type": "agent_reg",
+            "object_id": "agent_abc123" }
+    """
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+
+    body = await request.json()
+    user = body.get("user")
+    relation = body.get("relation")
+    object_type = body.get("object_type")
+    object_id = body.get("object_id")
+
+    if not all([user, relation, object_type, object_id]):
+        raise HTTPException(status_code=400, detail="user, relation, object_type, object_id are all required")
+
+    ok = await revoke_permission(user, relation, object_type, object_id)
+    if not ok:
+        raise HTTPException(status_code=502, detail="FGA revoke failed — check server logs")
+
+    logger.info(f"FGA REVOKE: {user} {relation} {object_type}:{object_id}")
+    return {"status": "revoked", "user": user, "relation": relation, "object": f"{object_type}:{object_id}"}
+
+
+@app.post("/shieldclaw/fga/check")
+async def fga_check_endpoint(request: Request):
+    """Check an FGA permission. Requires gateway:admin scope.
+
+    Body: { "user": "agent:agent_xxx",
+            "relation": "can_execute",
+            "object_type": "agent_reg",
+            "object_id": "agent_abc123" }
+    """
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+
+    body = await request.json()
+    user = body.get("user")
+    relation = body.get("relation")
+    object_type = body.get("object_type")
+    object_id = body.get("object_id")
+
+    if not all([user, relation, object_type, object_id]):
+        raise HTTPException(status_code=400, detail="user, relation, object_type, object_id are all required")
+
+    allowed = await check_permission(user, relation, object_type, object_id, fail_open=False)
+    return {"allowed": allowed, "user": user, "relation": relation, "object": f"{object_type}:{object_id}"}
+
+
+@app.get("/shieldclaw/fga/relations")
+async def fga_list_relations(request: Request):
+    """List relations a user has on an object. Requires gateway:admin scope.
+
+    Query params: user, object_type, object_id
+    """
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+
+    user = request.query_params.get("user")
+    object_type = request.query_params.get("object_type")
+    object_id = request.query_params.get("object_id")
+
+    if not all([user, object_type, object_id]):
+        raise HTTPException(status_code=400, detail="user, object_type, object_id query params required")
+
+    relations = await list_relations(user, object_type, object_id)
+    return {"user": user, "object": f"{object_type}:{object_id}", "relations": relations}
 
 
 @app.get("/shieldclaw/whoami")
@@ -2279,7 +2415,7 @@ async def proxy(request: Request, path: str):
         fga_payload = {"method": request.method, "path": request_path, "body": body_dict}
         action_type = f"{request.method.lower()}:{request_path.strip('/').split('/')[1] if '/' in request_path.strip('/') else request_path.strip('/')}"
 
-        fga_result = check_fga(agent_id, action_type, fga_payload)
+        fga_result = await check_fga_full(agent_id, action_type, fga_payload, user_sub=identity.get("sub"))
         if not fga_result.allowed:
             log_request(identity, token_scopes, request.method, request_path, 403)
             raise HTTPException(status_code=403, detail=fga_result.reason)

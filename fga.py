@@ -1,24 +1,21 @@
 """
 FGA — Fine-Grained Authorization for ShieldClaw.
 
-Hard gate that runs BEFORE any request reaches OpenClaw.
-Default-deny: if no rule explicitly allows something, it's blocked.
-
-Policy is loaded from fga_policy.yaml (per-agent or global default).
-This is not an LLM prompt — it's a deterministic rule check in the proxy layer.
+Two-layer authorization:
+  Layer 1: Local YAML policy (fga_policy.yaml) — fast, deterministic, offline
+  Layer 2: Auth0 FGA (OpenFGA) — relationship-based, fine-grained, remote
 
 Check order:
-  1. Deny rules — if any match, block immediately
-  2. Allow rules — if any match, permit
-  3. No match — block (default deny)
+  1. YAML deny rules — if any match, block immediately (no FGA call needed)
+  2. YAML allow rules — if any match, permit (then optionally verify via FGA)
+  3. Auth0 FGA check — if configured, check relationship tuples
+  4. No match — block (default deny)
 
-Each rule can match on:
-  - path_prefix: filesystem/URL paths the agent is trying to touch
-  - command: shell commands or action types
-  - method: HTTP method (GET, POST, etc.)
-  - route_prefix: OpenClaw API route prefix
+The YAML layer handles command/path-level policy (rm -rf, sudo, etc.).
+The FGA layer handles relationship-level policy (does this agent own this resource?).
 """
 
+import asyncio
 import re
 import json
 import logging
@@ -38,7 +35,7 @@ class FGAResult:
     allowed: bool
     reason: str
     matched_rule: Optional[str] = None
-    rule_type: Optional[str] = None  # "allow" | "deny" | "default-deny"
+    rule_type: Optional[str] = None  # "allow" | "deny" | "default-deny" | "fga-allow" | "fga-deny"
 
 
 def _load_yaml(path: Path) -> dict:
@@ -170,6 +167,7 @@ class FGAEngine:
     Loads and caches FGA policies. Supports:
     - Global default policy (fga_policy.yaml)
     - Per-agent policy overrides (fga_policy_{agent_id}.yaml)
+    - Auth0 FGA relationship checks (if configured)
     """
 
     def __init__(self, policy_path: Path = FGA_POLICY_PATH):
@@ -187,8 +185,6 @@ class FGAEngine:
                 logger.warning(
                     f"FGA: No policy file found at {self.policy_path}. Using open-allow fallback."
                 )
-                # Fallback: allow everything if no policy file exists
-                # This preserves backward compatibility during rollout
                 self._default_policy = FGAPolicy({"agent": "default", "deny": [], "allow": [{"action_type": ".*", "reason": "No policy file — open allow"}]})
         return self._default_policy
 
@@ -215,12 +211,163 @@ class FGAEngine:
 
     def check(self, agent_id: str, action_type: str, payload: dict) -> FGAResult:
         """
-        Run the FGA check for a given agent + action.
+        Run the YAML FGA check for a given agent + action.
 
         Uses per-agent policy if available, falls back to global default.
         """
         policy = self._load_agent(agent_id) or self._load_default()
         return policy.check(action_type, payload)
+
+    async def check_with_openfga(
+        self,
+        agent_id: str,
+        action_type: str,
+        payload: dict,
+        user_sub: Optional[str] = None,
+    ) -> FGAResult:
+        """
+        Two-layer check: YAML first, then Auth0 FGA for relationship-based decisions.
+
+        The YAML layer handles command/path deny/allow.
+        The FGA layer checks if the agent has the right relationship to the resource.
+        """
+        # Layer 1: YAML policy check
+        yaml_result = self.check(agent_id, action_type, payload)
+
+        # If YAML hard-denied, don't bother with FGA
+        if not yaml_result.allowed and yaml_result.rule_type == "deny":
+            return yaml_result
+
+        # Layer 2: Auth0 FGA relationship check (non-blocking import)
+        try:
+            from fga_client import check_permission, _fga_available
+
+            if not _fga_available:
+                return yaml_result  # FGA not configured — use YAML result only
+
+            # Determine the FGA object and relation from the request
+            fga_object_type, fga_object_id, fga_relation = _extract_fga_context(
+                action_type, payload
+            )
+
+            if not fga_object_type:
+                # No FGA-checkable resource found — fall through to YAML result
+                return yaml_result
+
+            # Build the FGA user string
+            fga_user = f"agent:{agent_id}"
+
+            allowed = await check_permission(
+                user=fga_user,
+                relation=fga_relation,
+                object_type=fga_object_type,
+                object_id=fga_object_id,
+                fail_open=(yaml_result.allowed),  # if YAML allowed, fail open on FGA error
+            )
+
+            if allowed:
+                return FGAResult(
+                    allowed=True,
+                    reason=f"[FGA] Allowed by Auth0 FGA: {fga_user} {fga_relation} {fga_object_type}:{fga_object_id}",
+                    rule_type="fga-allow",
+                )
+            else:
+                # FGA denied — but if YAML explicitly allowed, log warning and still allow
+                # (YAML allow = deterministic baseline, FGA = additional check)
+                if yaml_result.allowed:
+                    logger.warning(
+                        f"FGA: Auth0 FGA denied but YAML allowed — using YAML result. "
+                        f"user={fga_user} relation={fga_relation} object={fga_object_type}:{fga_object_id}"
+                    )
+                    return yaml_result
+
+                return FGAResult(
+                    allowed=False,
+                    reason=f"[FGA] Denied by Auth0 FGA: {fga_user} lacks '{fga_relation}' on {fga_object_type}:{fga_object_id}",
+                    rule_type="fga-deny",
+                )
+
+        except Exception as e:
+            logger.error(f"FGA: Auth0 FGA check failed: {e} — falling back to YAML result")
+            return yaml_result
+
+
+def _extract_fga_context(
+    action_type: str, payload: dict
+) -> tuple[Optional[str], Optional[str], str]:
+    """
+    Extract FGA object_type, object_id, and relation from the request context.
+
+    Returns (object_type, object_id, relation) or (None, None, "") if not applicable.
+    """
+    method = payload.get("method", "GET").upper()
+    path = payload.get("path", "")
+
+    # Agent management routes
+    if path.startswith("/shieldclaw/agents"):
+        parts = path.strip("/").split("/")
+        if len(parts) >= 3:
+            # /shieldclaw/agents/{agent_id}/...
+            agent_id = parts[2]
+            if "revoke" in path:
+                return "agent_reg", agent_id, "can_revoke"
+            elif "rotate" in path:
+                return "agent_reg", agent_id, "can_rotate"
+            else:
+                return "agent_reg", agent_id, "viewer"
+        # POST /shieldclaw/agents (create) — check gateway admin
+        if method == "POST":
+            return "gateway", "main", "admin"
+        return "gateway", "main", "viewer"
+
+    # Thread routes
+    if "/backboard/threads" in path:
+        parts = path.strip("/").split("/")
+        for i, p in enumerate(parts):
+            if p == "threads" and i + 1 < len(parts):
+                thread_id = parts[i + 1]
+                return "thread", thread_id, "viewer"
+        return None, None, ""
+
+    # Memory routes
+    if "/ltm/memory" in path:
+        parts = path.strip("/").split("/")
+        for i, p in enumerate(parts):
+            if p == "memory" and i + 1 < len(parts):
+                user_id = parts[i + 1]
+                if method == "POST":
+                    return "memory", user_id, "admin"
+                return "memory", user_id, "viewer"
+        return None, None, ""
+
+    # Approval routes
+    if "/approval/" in path:
+        parts = path.strip("/").split("/")
+        for i, p in enumerate(parts):
+            if p == "approval" and i + 1 < len(parts):
+                approval_id = parts[i + 1]
+                if "resolve" in path:
+                    return "approval", approval_id, "resolver"
+                return "approval", approval_id, "viewer"
+        return None, None, ""
+
+    # File operations (from body)
+    body = payload.get("body", {})
+    file_path = body.get("path") or body.get("file") or body.get("directory")
+    if file_path:
+        # Normalize to a safe FGA object ID
+        safe_id = file_path.replace("/", "_").strip("_")[:64]
+        if method == "DELETE" or "delete" in action_type.lower():
+            return "file", safe_id, "can_delete"
+        if method in ("POST", "PUT", "PATCH"):
+            return "file", safe_id, "editor"
+        return "file", safe_id, "viewer"
+
+    # Generic gateway access
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        return "gateway", "main", "operator"
+
+    return None, None, ""
 
 
 # Global singleton
@@ -228,5 +375,15 @@ fga = FGAEngine()
 
 
 def check_fga(agent_id: str, action_type: str, payload: dict) -> FGAResult:
-    """Convenience function — call this from main.py."""
+    """Convenience function — call this from main.py (synchronous, YAML only)."""
     return fga.check(agent_id, action_type, payload)
+
+
+async def check_fga_full(
+    agent_id: str,
+    action_type: str,
+    payload: dict,
+    user_sub: Optional[str] = None,
+) -> FGAResult:
+    """Full check: YAML + Auth0 FGA. Call this from async handlers."""
+    return await fga.check_with_openfga(agent_id, action_type, payload, user_sub)
