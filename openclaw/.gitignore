@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.bundle.hash
+*.bundle.js
