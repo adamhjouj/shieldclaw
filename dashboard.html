@@ -743,10 +743,8 @@
   <div class="sys-chip"><span class="sys-chip-label">UPTIME</span><span class="sys-chip-val ok" id="ssUptime">…</span></div>
 </div>
 
-<!-- AUTH BAR -->
+<!-- CONTROL BAR -->
 <div class="auth-bar">
-  <span class="auth-label">BEARER TOKEN //</span>
-  <input type="password" class="auth-input" id="tokenInput" placeholder="eyJhbGciOiJSUzI1NiIsInR5c..." autocomplete="off" spellcheck="false">
   <button class="btn btn-primary" id="fetchBtn" onclick="fetchLog()">FETCH LOG</button>
   <button class="btn btn-dim" id="autoBtn" onclick="toggleAuto()">AUTO-REFRESH</button>
   <span class="auth-label" style="margin-left:12px">EVAL MODE //</span>
@@ -811,7 +809,7 @@
   <div id="emptyState" class="empty-state">
     <div class="empty-state-icon">&#9632;</div>
     <div class="empty-state-title">NO DATA LOADED</div>
-    <div class="empty-state-sub">Enter your bearer token and fetch the log to begin monitoring.</div>
+    <div class="empty-state-sub">Click FETCH LOG or enable AUTO-REFRESH to begin monitoring.</div>
   </div>
 
   <table id="logTable" style="display:none">
@@ -866,19 +864,11 @@
 
   // ── FETCH ─────────────────────────────────────────────────────────────
   async function fetchLog() {
-    const token = document.getElementById('tokenInput').value.trim();
-    if (!token) {
-      showError('No bearer token provided.');
-      return;
-    }
-
     setLoading(true);
     hideError();
 
     try {
-      const res = await fetch('/shieldclaw/backboard/log', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await fetch('/shieldclaw/backboard/log');
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -1133,12 +1123,8 @@ trace   : ${esc(entry.trace_id || '—')}</pre>
 
   // ── EVAL MODE ─────────────────────────────────────────────────────────
   async function loadEvalMode() {
-    const token = document.getElementById('tokenInput').value.trim();
-    if (!token) return;
     try {
-      const res = await fetch('/shieldclaw/backboard/config', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await fetch('/shieldclaw/backboard/config');
       if (!res.ok) return;
       const data = await res.json();
       applyModeUI(data.eval_mode);
@@ -1146,12 +1132,10 @@ trace   : ${esc(entry.trace_id || '—')}</pre>
   }
 
   async function setEvalMode(mode) {
-    const token = document.getElementById('tokenInput').value.trim();
-    if (!token) { showError('No bearer token — cannot change mode.'); return; }
     try {
       const res = await fetch('/shieldclaw/backboard/config', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ eval_mode: mode }),
       });
       if (!res.ok) {
@@ -1172,10 +1156,6 @@ trace   : ${esc(entry.trace_id || '—')}</pre>
     fast.classList.toggle('active',  mode === 'fast');
   }
 
-  // allow Enter to fetch
-  document.getElementById('tokenInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') fetchLog();
-  });
 
   // ── CHARTS ────────────────────────────────────────────────────────────
   function renderCharts() {

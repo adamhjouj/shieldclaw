@@ -291,13 +291,13 @@ async def _do_register(message: discord.Message, session: dict):
 
         scope_list = ", ".join(f"`{s}`" for s in result.get("scopes", []))
         await message.channel.send(
-            f"✅ **You're registered!**\n\n"
+            f"✅ **You're all set!**\n\n"
             f"**Agent ID:** `{result['agent_id']}`\n"
-            f"**Client ID:** `{result['client_id']}`\n"
-            f"**Client Secret:** ||`{result['client_secret']}`||\n"
-            f"*(spoiler-tagged — click to reveal. Store it safely, it won't be shown again.)*\n\n"
             f"**Permissions granted:** {scope_list}\n\n"
-            f"You're all set! Use your `client_id` and `client_secret` to authenticate with Clawdbot."
+            f"Your agent is active and ready to use.\n\n"
+            f"**Client credentials** (save these — they won't be shown again):\n"
+            f"Client ID: ||`{result['client_id']}`||\n"
+            f"Client Secret: ||`{result['client_secret']}`||"
         )
         log.info(f"Registered agent {result['agent_id']} for Discord user {uid}")
     except httpx.HTTPStatusError as e:
@@ -338,6 +338,86 @@ async def on_message(message: discord.Message):
 
 
 # ---------------------------------------------------------------------------
+# Pending Discord approval requests
+# Populated by main.py when ShieldBot returns needs_confirmation.
+# Resolved when the user clicks Approve / Deny in Discord.
+# ---------------------------------------------------------------------------
+
+_pending_confirmations: dict[str, asyncio.Future] = {}
+_ADMIN_DISCORD_USER_ID: int | None = int(os.getenv("DISCORD_ADMIN_USER_ID", "0")) or None
+
+
+async def request_discord_approval(
+    request_id: str,
+    agent_name: str,
+    action_type: str,
+    reason: str,
+    risk_score: float,
+    factors: list,
+) -> bool:
+    """
+    DM the admin an Approve/Deny button prompt.
+    Returns True if approved, False if denied or timed out (60s).
+    Called from main.py instead of raising a 403 for needs_confirmation.
+    """
+    if not _ADMIN_DISCORD_USER_ID:
+        return False
+
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future = loop.create_future()
+    _pending_confirmations[request_id] = future
+
+    try:
+        admin_user = await bot.fetch_user(_ADMIN_DISCORD_USER_ID)
+        dm = await admin_user.create_dm()
+
+        factors_str = ", ".join(factors) if factors else "none"
+        embed = discord.Embed(title="ShieldBot Approval Required", color=0xf0a500)
+        embed.add_field(name="Agent", value=f"`{agent_name}`", inline=True)
+        embed.add_field(name="Action", value=f"`{action_type}`", inline=True)
+        embed.add_field(name="Risk Score", value=f"`{risk_score:.0f}/100`", inline=True)
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="Factors", value=f"`{factors_str}`", inline=False)
+        embed.set_footer(text=f"Request ID: {request_id} · Times out in 60s → auto-deny")
+
+        view = _ApprovalView(request_id)
+        await dm.send(embed=embed, view=view)
+
+        try:
+            return await asyncio.wait_for(future, timeout=60.0)
+        except asyncio.TimeoutError:
+            _pending_confirmations.pop(request_id, None)
+            await dm.send(f"Request `{request_id}` timed out — auto-denied.")
+            return False
+    except Exception as e:
+        log.warning(f"Discord approval request failed: {e}")
+        _pending_confirmations.pop(request_id, None)
+        return False
+
+
+class _ApprovalView(discord.ui.View):
+    def __init__(self, request_id: str):
+        super().__init__(timeout=60)
+        self.request_id = request_id
+
+    @discord.ui.button(label="Approve", style=discord.ButtonStyle.success)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        future = _pending_confirmations.pop(self.request_id, None)
+        if future and not future.done():
+            future.set_result(True)
+        self.stop()
+        await interaction.response.edit_message(content="Approved. The action will proceed.", embed=None, view=None)
+
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger)
+    async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):
+        future = _pending_confirmations.pop(self.request_id, None)
+        if future and not future.done():
+            future.set_result(False)
+        self.stop()
+        await interaction.response.edit_message(content="Denied. The action has been blocked.", embed=None, view=None)
+
+
+# ---------------------------------------------------------------------------
 # Slash commands
 # ---------------------------------------------------------------------------
 
@@ -348,15 +428,12 @@ async def slash_register(interaction: discord.Interaction):
             "You already have an onboarding in progress — check your DMs!", ephemeral=True
         )
         return
-    await interaction.response.send_message(
-        "I've sent you a DM to get you set up!", ephemeral=True
-    )
+    await interaction.response.send_message("I've sent you a DM to get you set up!", ephemeral=True)
     await _start_onboarding(interaction.user)
 
 
 @tree.command(name="permissions", description="Show what permissions your current agent has")
 async def slash_permissions(interaction: discord.Interaction):
-    """Quick lookup — shows the dev agent's permissions when DEV_BYPASS is on."""
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             resp = await client.get(
@@ -376,14 +453,111 @@ async def slash_permissions(interaction: discord.Interaction):
             await interaction.response.send_message(f"Could not fetch permissions: {e}", ephemeral=True)
 
 
+@tree.command(name="list-agents", description="List all registered ShieldClaw agents")
+async def slash_list_agents(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(
+                f"{SHIELDCLAW_URL}/shieldclaw/agents",
+                headers={"Authorization": f"Bearer {SHIELDCLAW_ADMIN_TOKEN}"},
+            )
+            resp.raise_for_status()
+            agents = resp.json().get("agents", [])
+            if not agents:
+                await interaction.followup.send("No agents registered yet.", ephemeral=True)
+                return
+            lines = []
+            for a in agents:
+                status = "revoked" if a.get("revoked") else "active"
+                scopes = ", ".join(f"`{s}`" for s in a.get("scopes", []))
+                lines.append(
+                    f"**{a['agent_name']}** — {status}\n"
+                    f"  ID: `{a['agent_id']}`\n"
+                    f"  Scopes: {scopes}"
+                )
+            await interaction.followup.send("\n\n".join(lines), ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"Failed to list agents: `{e}`", ephemeral=True)
+
+
+@tree.command(name="revoke", description="Revoke a ShieldClaw agent by ID")
+@app_commands.describe(agent_id="The agent ID to revoke (get it from /list-agents)")
+async def slash_revoke(interaction: discord.Interaction, agent_id: str):
+    await interaction.response.defer(ephemeral=True)
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.post(
+                f"{SHIELDCLAW_URL}/shieldclaw/agents/{agent_id}/revoke",
+                headers={"Authorization": f"Bearer {SHIELDCLAW_ADMIN_TOKEN}"},
+            )
+            resp.raise_for_status()
+            await interaction.followup.send(
+                f"Agent `{agent_id}` has been revoked. It can no longer authenticate.",
+                ephemeral=True,
+            )
+        except httpx.HTTPStatusError as e:
+            await interaction.followup.send(
+                f"Failed ({e.response.status_code}): {e.response.text[:200]}", ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"Error: `{e}`", ephemeral=True)
+
+
+@tree.command(name="rotate-secret", description="Rotate the client secret for an agent")
+@app_commands.describe(agent_id="The agent ID to rotate (get it from /list-agents)")
+async def slash_rotate_secret(interaction: discord.Interaction, agent_id: str):
+    await interaction.response.defer(ephemeral=True)
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.post(
+                f"{SHIELDCLAW_URL}/shieldclaw/agents/{agent_id}/rotate-secret",
+                headers={"Authorization": f"Bearer {SHIELDCLAW_ADMIN_TOKEN}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            await interaction.followup.send(
+                f"**Secret rotated** for `{agent_id}`\n\n"
+                f"**New Client Secret:** ||`{data['client_secret']}`||\n"
+                f"*(click to reveal — save it now, it won't be shown again)*\n\n"
+                f"The old secret is immediately invalid.",
+                ephemeral=True,
+            )
+        except httpx.HTTPStatusError as e:
+            await interaction.followup.send(
+                f"Failed ({e.response.status_code}): {e.response.text[:200]}", ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"Error: `{e}`", ephemeral=True)
+
+
+@tree.command(name="status", description="Check ShieldClaw gateway health")
+async def slash_status(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    async with httpx.AsyncClient(timeout=8) as client:
+        try:
+            resp = await client.get(
+                f"{SHIELDCLAW_URL}/shieldclaw/health",
+                headers={"Authorization": f"Bearer {SHIELDCLAW_ADMIN_TOKEN}"},
+            )
+            data = resp.json() if resp.status_code == 200 else {}
+            vault_status = data.get("vault", {})
+            lines = [f"**ShieldClaw Gateway** — {'online' if resp.status_code == 200 else 'error'}"]
+            for key, val in vault_status.items():
+                icon = "set" if val == "set" else "MISSING"
+                lines.append(f"  `{key}`: {icon}")
+            await interaction.followup.send("\n".join(lines), ephemeral=True)
+        except Exception:
+            await interaction.followup.send(
+                "**Gateway is unreachable.** Make sure ShieldClaw is running.", ephemeral=True
+            )
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     if not DISCORD_BOT_TOKEN:
-        print("ERROR: DISCORD_BOT_TOKEN is not set.")
-        print("Set it in your .env file or environment and try again.")
-        raise SystemExit(1)
-
+        raise SystemExit("DISCORD_BOT_TOKEN is not set in .env")
     bot.run(DISCORD_BOT_TOKEN)
