@@ -1,82 +1,106 @@
-"""Thread manager — real Backboard.io threads.
+"""Backboard-style thread manager — SQLite-backed.
 
-Every session gets a real persistent thread on Backboard.io.
-Events are posted as messages with memory=Auto so Backboard
-automatically extracts and stores relevant facts.
+Threads provide per-task/session context for Shieldbot evaluations.
+Persists across process restarts via a local SQLite database.
 """
 
 from __future__ import annotations
 
 import json
+import sqlite3
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from . import backboard_client
+from . import config
 
-# Maps session_id → backboard thread_id
-_session_map: dict[str, str] = {}
 
-# Local mirror of history (for fast in-process reads)
-_local_history: dict[str, list[dict[str, Any]]] = {}
+def _conn() -> sqlite3.Connection:
+    db_path = config.get_db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_db(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS threads (
+            session_id  TEXT PRIMARY KEY,
+            thread_id   TEXT NOT NULL,
+            user_id     TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            history     TEXT NOT NULL DEFAULT '[]'
+        )
+    """)
+    conn.commit()
 
 
 def get_or_create_thread(session_id: str, user_id: str) -> dict[str, Any]:
-    if session_id in _session_map:
-        return {
-            "thread_id": _session_map[session_id],
+    with _conn() as conn:
+        _init_db(conn)
+        row = conn.execute(
+            "SELECT * FROM threads WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if row:
+            return {
+                "thread_id": row["thread_id"],
+                "session_id": row["session_id"],
+                "user_id": row["user_id"],
+                "created_at": row["created_at"],
+                "history": json.loads(row["history"]),
+            }
+        thread = {
+            "thread_id": str(uuid.uuid4()),
             "session_id": session_id,
             "user_id": user_id,
-            "history": _local_history.get(session_id, []),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "history": [],
         }
-
-    result = backboard_client.create_thread()
-    thread_id = result["thread_id"]
-    _session_map[session_id] = thread_id
-    _local_history[session_id] = []
-
-    # Post an init message so the thread has context
-    backboard_client.add_message(
-        thread_id,
-        json.dumps({"event": "thread_created", "user_id": user_id, "session_id": session_id}),
-        memory="Auto",
-        send_to_llm="false",
-    )
-
-    return {
-        "thread_id": thread_id,
-        "session_id": session_id,
-        "user_id": user_id,
-        "history": [],
-    }
+        conn.execute(
+            "INSERT INTO threads (session_id, thread_id, user_id, created_at, history) VALUES (?,?,?,?,?)",
+            (session_id, thread["thread_id"], user_id, thread["created_at"], "[]"),
+        )
+        conn.commit()
+        return thread
 
 
 def append_to_thread(session_id: str, entry: dict[str, Any]) -> None:
     entry["timestamp"] = datetime.now(timezone.utc).isoformat()
-
-    # Local mirror
-    _local_history.setdefault(session_id, []).append(entry)
-
-    # Push to Backboard
-    if session_id in _session_map:
-        thread_id = _session_map[session_id]
-        backboard_client.add_message(
-            thread_id,
-            json.dumps(entry, default=str),
-            memory="Auto",
-            send_to_llm="false",
+    with _conn() as conn:
+        _init_db(conn)
+        row = conn.execute(
+            "SELECT history FROM threads WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return
+        history = json.loads(row["history"])
+        history.append(entry)
+        conn.execute(
+            "UPDATE threads SET history = ? WHERE session_id = ?",
+            (json.dumps(history), session_id),
         )
+        conn.commit()
 
 
 def get_thread(session_id: str) -> dict[str, Any] | None:
-    if session_id not in _session_map:
-        return None
-    return {
-        "thread_id": _session_map[session_id],
-        "session_id": session_id,
-        "history": _local_history.get(session_id, []),
-    }
+    with _conn() as conn:
+        _init_db(conn)
+        row = conn.execute(
+            "SELECT * FROM threads WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "thread_id": row["thread_id"],
+            "session_id": row["session_id"],
+            "user_id": row["user_id"],
+            "created_at": row["created_at"],
+            "history": json.loads(row["history"]),
+        }
 
 
 def clear_all() -> None:
-    _session_map.clear()
-    _local_history.clear()
+    with _conn() as conn:
+        _init_db(conn)
+        conn.execute("DELETE FROM threads")
+        conn.commit()

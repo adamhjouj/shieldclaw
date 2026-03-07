@@ -1,7 +1,12 @@
-"""Central evaluation pipeline — Claude-powered.
+"""Central evaluation pipeline — Claude-powered, routed through Backboard.
 
-Any action type is accepted. Claude Haiku classifies it and returns a structured
-safety decision. No hardcoded rules, no fixed action types.
+LLM calls go through Backboard's unified API when a BACKBOARD_API_KEY is set,
+falling back to direct Anthropic if not. eval_mode is toggled live via config:
+
+    "think" → claude-sonnet-4-6 with extended thinking (interpretable reasoning)
+    "fast"  → claude-haiku-4-5 without thinking (low latency)
+
+Model switching requires zero code changes — just flip config.set_eval_mode().
 """
 
 from __future__ import annotations
@@ -10,9 +15,10 @@ import json
 import os
 
 import anthropic
+import httpx
 
 from .types import ActionRequest, Decision
-from . import thread_manager, memory, logger
+from . import thread_manager, memory, logger, config
 from .trace import DecisionTrace, build_decision_trace
 from .capture import (
     OpenClawInput,
@@ -21,9 +27,10 @@ from .capture import (
     capture_openclaw_input,
     capture_openclaw_output,
 )
-from . import backboard
 
-_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+_trace_log: list[dict] = []
+
+_anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 _BASE_SYSTEM_PROMPT = """You are a security policy engine for an AI agent system.
 
@@ -69,6 +76,99 @@ def _build_system_prompt(trust_tier: str) -> str:
     return f"{_BASE_SYSTEM_PROMPT}\n\n{tier_instruction}"
 
 
+# ---------------------------------------------------------------------------
+# LLM call — Backboard unified API or direct Anthropic fallback
+# ---------------------------------------------------------------------------
+
+def _call_via_backboard(eval_mode: str, system: str, user_message: str) -> tuple[str, str | None]:
+    """
+    Route through Backboard's unified API.
+    Returns (raw_json_text, thinking_text_or_None).
+
+    Backboard exposes a REST messages endpoint that mirrors Anthropic's format.
+    We send the request with the appropriate model ID and, for "think" mode,
+    include the extended_thinking parameter.
+    """
+    model = config.BACKBOARD_THINK_MODEL if eval_mode == "think" else config.BACKBOARD_FAST_MODEL
+
+    body: dict = {
+        "model": model,
+        "system": system,
+        "messages": [{"role": "user", "content": user_message}],
+    }
+
+    if eval_mode == "think":
+        body["max_tokens"] = 16000
+        body["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+    else:
+        body["max_tokens"] = 256
+
+    headers = {
+        "X-API-Key": config.BACKBOARD_API_KEY,
+        "Content-Type": "application/json",
+    }
+
+    resp = httpx.post(
+        f"{config.BACKBOARD_BASE_URL}/messages",
+        json=body,
+        headers=headers,
+        timeout=120,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    raw = ""
+    thinking_text = None
+    for block in data.get("content", []):
+        if block.get("type") == "thinking":
+            thinking_text = block.get("thinking", "")
+        elif block.get("type") == "text":
+            raw = block.get("text", "").strip()
+
+    return raw, thinking_text
+
+
+def _call_direct_anthropic(eval_mode: str, system: str, user_message: str) -> tuple[str, str | None]:
+    """Fallback: call Anthropic directly (original behaviour)."""
+    thinking_text = None
+
+    if eval_mode == "think":
+        response = _anthropic_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=16000,
+            thinking={"type": "enabled", "budget_tokens": 10000},
+            system=system,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        raw = ""
+        for block in response.content:
+            if block.type == "thinking":
+                thinking_text = block.thinking
+            elif block.type == "text":
+                raw = block.text.strip()
+    else:
+        response = _anthropic_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            system=system,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        raw = response.content[0].text.strip()
+
+    return raw, thinking_text
+
+
+def _call_llm(eval_mode: str, system: str, user_message: str) -> tuple[str, str | None]:
+    """Route to Backboard if configured, else call Anthropic directly."""
+    if config.use_backboard():
+        return _call_via_backboard(eval_mode, system, user_message)
+    return _call_direct_anthropic(eval_mode, system, user_message)
+
+
+# ---------------------------------------------------------------------------
+# Main evaluation entry point
+# ---------------------------------------------------------------------------
+
 def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
     # 1. Thread context
     thread = thread_manager.get_or_create_thread(request.session_id, request.user_id)
@@ -84,15 +184,11 @@ def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
     # 4. Build the prompt for Claude
     user_message = _build_prompt(request, merged_prefs, user_mem)
 
-    # 5. Call Claude Haiku — cheapest model, fast, good enough for classification
+    # 5. Call LLM — routed through Backboard or direct Anthropic
+    eval_mode = config.get_eval_mode()
+    thinking_text = None
     try:
-        response = _client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=256,
-            system=_build_system_prompt(effective_tier),
-            messages=[{"role": "user", "content": user_message}],
-        )
-        raw = response.content[0].text.strip()
+        raw, thinking_text = _call_llm(eval_mode, _build_system_prompt(effective_tier), user_message)
         parsed = json.loads(raw)
         decision = Decision(
             status=parsed["status"],
@@ -102,7 +198,6 @@ def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
             thread_id=thread_id,
         )
     except Exception as e:
-        # If Claude call fails, fail safe — block and surface the error
         decision = Decision(
             status="blocked",
             reason=f"Safety evaluation failed: {e}",
@@ -111,10 +206,10 @@ def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
             thread_id=thread_id,
         )
 
-    # 6. Audit log
-    logger.log_decision(request, decision, effective_tier)
+    # 6. Audit log (also ships to Backboard analytics)
+    logger.log_decision(request, decision, effective_tier, thinking=thinking_text)
 
-    # 6. Update thread and user memory
+    # 7. Update thread and user memory
     thread_manager.append_to_thread(request.session_id, {
         "action_type": request.action_type,
         "status": decision.status,
@@ -159,16 +254,17 @@ def _build_prompt(
     if request.prior_behavior_summary:
         parts.append(f"Prior behavior context: {request.prior_behavior_summary}")
 
-    # Include recent thread history so Claude has session context
     thread = thread_manager.get_thread(request.session_id)
     if thread and thread["history"]:
-        recent = thread["history"][-5:]  # last 5 actions in this session
+        recent = thread["history"][-5:]
         parts.append(f"Recent session actions: {json.dumps(recent, indent=2)}")
 
     return "\n\n".join(parts)
 
 
-# ── High-level orchestration with OpenClaw capture + decision trace ──
+# ---------------------------------------------------------------------------
+# High-level orchestration with OpenClaw capture + decision trace
+# ---------------------------------------------------------------------------
 
 def evaluate_shieldbot_request(
     *,
@@ -185,13 +281,11 @@ def evaluate_shieldbot_request(
 ) -> tuple[Decision, DecisionTrace, InteractionRecord]:
     """Full Shieldbot evaluation with OpenClaw capture and decision trace.
 
-    This is the top-level entry point that:
     1. Captures the OpenClaw input (user request + parsed action)
     2. Captures the OpenClaw output (proposed action)
     3. Evaluates via Claude
     4. Builds a structured decision trace
-    5. Records the full interaction in the Backboard thread
-    6. Returns (decision, trace, interaction_record)
+    5. Returns (decision, trace, interaction_record)
     """
     oc_input = capture_openclaw_input(
         user_request=user_request,
@@ -213,7 +307,6 @@ def evaluate_shieldbot_request(
     )
     decision = evaluate(req, trust_tier=trust_tier)
 
-    # Derive matched rules/preferences from Claude's factors
     matched_rules = [f for f in decision.factors if not f.startswith("user_")]
     matched_prefs = [f for f in decision.factors if f.startswith("user_")]
 
@@ -244,29 +337,9 @@ def evaluate_shieldbot_request(
         thread_id=decision.thread_id or "",
     )
 
-    # Store everything in Backboard
-    backboard.log_decision_trace(decision.thread_id or "", session_id, trace)
-    backboard.record_interaction(session_id, record)
-
+    _trace_log.append(trace.to_dict())
     return decision, trace, record
 
 
-def record_openclaw_interaction(
-    oc_input: OpenClawInput,
-    oc_output: OpenClawOutput,
-    decision: Decision,
-    session_id: str,
-) -> InteractionRecord:
-    """Record an already-evaluated interaction into the Backboard thread."""
-    record = InteractionRecord(
-        openclaw_input=oc_input,
-        openclaw_output=oc_output,
-        shieldbot_decision=decision.status,
-        shieldbot_reason=decision.reason,
-        risk_score=decision.risk_score,
-        risk_factors=decision.factors,
-        trace_id="manual",
-        thread_id=decision.thread_id or "",
-    )
-    backboard.record_interaction(session_id, record)
-    return record
+def get_trace_log() -> list[dict]:
+    return list(_trace_log)
