@@ -17,7 +17,7 @@ Quick usage:
     print(decision.status, trace.final_reason)
 """
 
-from .action_types import ActionRequest, Decision
+from .types import ActionRequest, Decision
 from .evaluator import evaluate, evaluate_shieldbot_request, record_openclaw_interaction
 from .trace import DecisionTrace, build_decision_trace
 from .capture import (

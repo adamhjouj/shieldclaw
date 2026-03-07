@@ -18,7 +18,7 @@ import re
 import anthropic
 import httpx
 
-from .action_types import ActionRequest, Decision
+from .types import ActionRequest, Decision
 from . import thread_manager, memory, logger, config, backboard_client
 from .trace import DecisionTrace, build_decision_trace
 from .capture import (
