@@ -35,7 +35,7 @@ _DEV_AGENT = {
     "agent_name": "dev-agent",
     "auth0_client_id": "dev-client-id",
     "owner_sub": "dev-user@devlocal",
-    "scopes": ["gateway:read", "gateway:message", "gateway:tools", "gateway:canvas"],
+    "scopes": ["gateway:read", "gateway:message", "gateway:tools", "gateway:canvas", "gateway:admin"],
     "created_at": 0.0,
     "data_access": [],  # populated after SENSITIVE_PATTERNS is imported
     "revoked": False,
