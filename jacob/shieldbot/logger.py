@@ -18,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from .action_types import ActionRequest, Decision
+from .types import ActionRequest, Decision
 from . import config
 
 
