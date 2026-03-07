@@ -781,35 +781,23 @@ async def backboard_dashboard():
 
 
 @app.get("/shieldclaw/backboard/log")
-async def backboard_log(request: Request):
-    """Return the Backboard audit log as JSON. Requires gateway:admin scope."""
-    payload = await verify_token(request)
-    token_scopes = set(payload.get("scope", "").split())
-    if "gateway:admin" not in token_scopes:
-        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+async def backboard_log():
+    """Return the Backboard audit log as JSON."""
     return JSONResponse(content={"log": shieldbot_logger.get_audit_log()})
 
 
 @app.get("/shieldclaw/backboard/config")
-async def backboard_get_config(request: Request):
-    """Return current Shieldbot runtime config. Requires gateway:admin scope."""
-    payload = await verify_token(request)
-    token_scopes = set(payload.get("scope", "").split())
-    if "gateway:admin" not in token_scopes:
-        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+async def backboard_get_config():
+    """Return current Shieldbot runtime config."""
     return JSONResponse(content=shieldbot_config.get_config())
 
 
 @app.post("/shieldclaw/backboard/config")
 async def backboard_set_config(request: Request):
-    """Update Shieldbot runtime config. Requires gateway:admin scope.
+    """Update Shieldbot runtime config.
 
     Body: { "eval_mode": "think" | "fast" }
     """
-    payload = await verify_token(request)
-    token_scopes = set(payload.get("scope", "").split())
-    if "gateway:admin" not in token_scopes:
-        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
     body = await request.json()
     if "eval_mode" in body:
         try:
@@ -1114,7 +1102,26 @@ async def proxy(request: Request, path: str):
         except Exception:
             pass
 
-        if decision.status in ("blocked", "needs_confirmation"):
+        if decision.status == "needs_confirmation":
+            import uuid as _uuid
+            from discord_onboarding import request_discord_approval
+            request_id = _uuid.uuid4().hex[:12]
+            approved = await request_discord_approval(
+                request_id=request_id,
+                agent_name=identity.get("agent_name", "unknown"),
+                action_type=action_req.action_type,
+                reason=decision.reason,
+                risk_score=decision.risk_score,
+                factors=decision.factors,
+            )
+            if not approved:
+                log_request(identity, token_scopes, request.method, request_path, 403)
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"[ShieldBot] Action denied via Discord (risk={decision.risk_score:.0f})",
+                )
+
+        elif decision.status == "blocked":
             log_request(identity, token_scopes, request.method, request_path, 403)
             raise HTTPException(
                 status_code=403,

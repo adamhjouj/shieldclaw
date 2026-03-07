@@ -666,6 +666,34 @@
 
   .row-new { animation: row-in 0.3s ease forwards; }
 
+  /* ── CHARTS ── */
+  .charts-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+
+  .chart-panel {
+    padding: 12px 18px 14px;
+    border-right: 1px solid var(--border);
+    position: relative;
+  }
+
+  .chart-panel:last-child { border-right: none; }
+
+  .chart-label {
+    font-size: 0.55rem;
+    letter-spacing: 0.3em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .chart-panel canvas {
+    display: block;
+    width: 100%;
+  }
+
   /* scrollbars */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -715,10 +743,8 @@
   <div class="sys-chip"><span class="sys-chip-label">UPTIME</span><span class="sys-chip-val ok" id="ssUptime">…</span></div>
 </div>
 
-<!-- AUTH BAR -->
+<!-- CONTROL BAR -->
 <div class="auth-bar">
-  <span class="auth-label">BEARER TOKEN //</span>
-  <input type="password" class="auth-input" id="tokenInput" placeholder="eyJhbGciOiJSUzI1NiIsInR5c..." autocomplete="off" spellcheck="false">
   <button class="btn btn-primary" id="fetchBtn" onclick="fetchLog()">FETCH LOG</button>
   <button class="btn btn-dim" id="autoBtn" onclick="toggleAuto()">AUTO-REFRESH</button>
   <span class="auth-label" style="margin-left:12px">EVAL MODE //</span>
@@ -756,6 +782,22 @@
   </div>
 </div>
 
+<!-- CHARTS -->
+<div class="charts-row" id="chartsRow" style="display:none">
+  <div class="chart-panel">
+    <div class="chart-label">RISK SCORE OVER TIME</div>
+    <canvas id="chartRisk" height="90"></canvas>
+  </div>
+  <div class="chart-panel">
+    <div class="chart-label">APPROVAL BREAKDOWN</div>
+    <canvas id="chartBreakdown" height="90"></canvas>
+  </div>
+  <div class="chart-panel">
+    <div class="chart-label">EVALUATIONS PER MINUTE</div>
+    <canvas id="chartVolume" height="90"></canvas>
+  </div>
+</div>
+
 <!-- LAST UPDATED -->
 <div class="last-updated">
   <div class="spinner" id="spinner"></div>
@@ -767,7 +809,7 @@
   <div id="emptyState" class="empty-state">
     <div class="empty-state-icon">&#9632;</div>
     <div class="empty-state-title">NO DATA LOADED</div>
-    <div class="empty-state-sub">Enter your bearer token and fetch the log to begin monitoring.</div>
+    <div class="empty-state-sub">Click FETCH LOG or enable AUTO-REFRESH to begin monitoring.</div>
   </div>
 
   <table id="logTable" style="display:none">
@@ -822,19 +864,11 @@
 
   // ── FETCH ─────────────────────────────────────────────────────────────
   async function fetchLog() {
-    const token = document.getElementById('tokenInput').value.trim();
-    if (!token) {
-      showError('No bearer token provided.');
-      return;
-    }
-
     setLoading(true);
     hideError();
 
     try {
-      const res = await fetch('/shieldclaw/backboard/log', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await fetch('/shieldclaw/backboard/log');
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -1089,12 +1123,8 @@ trace   : ${esc(entry.trace_id || '—')}</pre>
 
   // ── EVAL MODE ─────────────────────────────────────────────────────────
   async function loadEvalMode() {
-    const token = document.getElementById('tokenInput').value.trim();
-    if (!token) return;
     try {
-      const res = await fetch('/shieldclaw/backboard/config', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await fetch('/shieldclaw/backboard/config');
       if (!res.ok) return;
       const data = await res.json();
       applyModeUI(data.eval_mode);
@@ -1102,12 +1132,10 @@ trace   : ${esc(entry.trace_id || '—')}</pre>
   }
 
   async function setEvalMode(mode) {
-    const token = document.getElementById('tokenInput').value.trim();
-    if (!token) { showError('No bearer token — cannot change mode.'); return; }
     try {
       const res = await fetch('/shieldclaw/backboard/config', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ eval_mode: mode }),
       });
       if (!res.ok) {
@@ -1128,10 +1156,282 @@ trace   : ${esc(entry.trace_id || '—')}</pre>
     fast.classList.toggle('active',  mode === 'fast');
   }
 
-  // allow Enter to fetch
-  document.getElementById('tokenInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') fetchLog();
-  });
+
+  // ── CHARTS ────────────────────────────────────────────────────────────
+  function renderCharts() {
+    if (!logData.length) {
+      document.getElementById('chartsRow').style.display = 'none';
+      return;
+    }
+    document.getElementById('chartsRow').style.display = '';
+
+    const sorted = logData.slice().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    drawRiskChart(sorted);
+    drawBreakdownChart();
+    drawVolumeChart(sorted);
+  }
+
+  function getCSSVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function setupCanvas(id) {
+    const canvas = document.getElementById(id);
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const w = rect.width - 36; // account for padding
+    canvas.style.width  = w + 'px';
+    canvas.style.height = '90px';
+    canvas.width  = w * dpr;
+    canvas.height = 90 * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx, w, h: 90 };
+  }
+
+  function drawRiskChart(sorted) {
+    const { ctx, w, h } = setupCanvas('chartRisk');
+
+    const pad = { top: 6, right: 8, bottom: 20, left: 32 };
+    const iw = w - pad.left - pad.right;
+    const ih = h - pad.top - pad.bottom;
+
+    const scores = sorted.map(e => e.risk_score);
+    const minS = 0, maxS = 100;
+    const n = scores.length;
+
+    const xPos = i => pad.left + (n > 1 ? (i / (n - 1)) * iw : iw / 2);
+    const yPos = v => pad.top + ih - ((v - minS) / (maxS - minS)) * ih;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // grid lines at 0, 30, 65, 100
+    ctx.strokeStyle = getCSSVar('--border');
+    ctx.lineWidth = 1;
+    [0, 30, 65, 100].forEach(v => {
+      const y = yPos(v);
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left + iw, y);
+      ctx.stroke();
+
+      ctx.fillStyle = getCSSVar('--text-dim');
+      ctx.font = '9px Share Tech Mono, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(v, pad.left - 4, y + 3);
+    });
+
+    if (n < 2) return;
+
+    // gradient fill under line
+    const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + ih);
+    grad.addColorStop(0,   'rgba(255,59,92,0.25)');
+    grad.addColorStop(0.35,'rgba(240,165,0,0.15)');
+    grad.addColorStop(1,   'rgba(0,212,106,0.04)');
+
+    ctx.beginPath();
+    ctx.moveTo(xPos(0), yPos(scores[0]));
+    for (let i = 1; i < n; i++) ctx.lineTo(xPos(i), yPos(scores[i]));
+    ctx.lineTo(xPos(n - 1), pad.top + ih);
+    ctx.lineTo(xPos(0),     pad.top + ih);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // line
+    ctx.beginPath();
+    ctx.moveTo(xPos(0), yPos(scores[0]));
+    for (let i = 1; i < n; i++) ctx.lineTo(xPos(i), yPos(scores[i]));
+    ctx.strokeStyle = getCSSVar('--accent');
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // dots for blocked entries
+    sorted.forEach((e, i) => {
+      if (e.status === 'blocked') {
+        ctx.beginPath();
+        ctx.arc(xPos(i), yPos(e.risk_score), 3, 0, Math.PI * 2);
+        ctx.fillStyle = getCSSVar('--red');
+        ctx.fill();
+      }
+    });
+
+    // x-axis labels (first, mid, last)
+    const labelIdx = [0, Math.floor((n - 1) / 2), n - 1];
+    ctx.fillStyle = getCSSVar('--text-dim');
+    ctx.font = '8px Share Tech Mono, monospace';
+    ctx.textAlign = 'center';
+    labelIdx.forEach(i => {
+      const t = new Date(sorted[i].timestamp);
+      const label = t.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+      ctx.fillText(label, xPos(i), h - 4);
+    });
+  }
+
+  function drawBreakdownChart() {
+    const { ctx, w, h } = setupCanvas('chartBreakdown');
+
+    const approved = logData.filter(r => r.status === 'approved').length;
+    const blocked  = logData.filter(r => r.status === 'blocked').length;
+    const pending  = logData.length - approved - blocked;
+
+    const slices = [
+      { label: 'APPROVED', val: approved, color: getCSSVar('--green') },
+      { label: 'BLOCKED',  val: blocked,  color: getCSSVar('--red')   },
+      { label: 'PENDING',  val: pending,  color: getCSSVar('--amber')  },
+    ].filter(s => s.val > 0);
+
+    const total = logData.length;
+    const cx = 50, cy = h / 2, r = 34;
+
+    ctx.clearRect(0, 0, w, h);
+
+    let angle = -Math.PI / 2;
+    slices.forEach(s => {
+      const sweep = (s.val / total) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, r, angle, angle + sweep);
+      ctx.closePath();
+      ctx.fillStyle = s.color;
+      ctx.globalAlpha = 0.85;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // thin separator
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, r, angle, angle + sweep);
+      ctx.closePath();
+      ctx.strokeStyle = getCSSVar('--bg2');
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      angle += sweep;
+    });
+
+    // center hole
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.56, 0, Math.PI * 2);
+    ctx.fillStyle = getCSSVar('--bg2');
+    ctx.fill();
+
+    // center label
+    ctx.fillStyle = getCSSVar('--text-bright');
+    ctx.font = 'bold 13px Orbitron, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(total, cx, cy - 6);
+    ctx.font = '8px Share Tech Mono, monospace';
+    ctx.fillStyle = getCSSVar('--text-dim');
+    ctx.fillText('TOTAL', cx, cy + 8);
+    ctx.textBaseline = 'alphabetic';
+
+    // legend
+    const legendX = cx + r + 14;
+    let ly = cy - (slices.length * 14) / 2 + 4;
+    slices.forEach(s => {
+      ctx.fillStyle = s.color;
+      ctx.fillRect(legendX, ly - 6, 8, 8);
+      ctx.fillStyle = getCSSVar('--text');
+      ctx.font = '9px Share Tech Mono, monospace';
+      ctx.textAlign = 'left';
+      const pct = Math.round(s.val / total * 100);
+      ctx.fillText(`${s.label} ${pct}%`, legendX + 12, ly + 1);
+      ly += 16;
+    });
+  }
+
+  function drawVolumeChart(sorted) {
+    const { ctx, w, h } = setupCanvas('chartVolume');
+
+    const pad = { top: 6, right: 8, bottom: 20, left: 28 };
+    const iw = w - pad.left - pad.right;
+    const ih = h - pad.top - pad.bottom;
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (sorted.length < 2) {
+      ctx.fillStyle = getCSSVar('--text-dim');
+      ctx.font = '9px Share Tech Mono, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('INSUFFICIENT DATA', w / 2, h / 2);
+      return;
+    }
+
+    // bucket into 12 equal time slots
+    const t0 = new Date(sorted[0].timestamp).getTime();
+    const t1 = new Date(sorted[sorted.length - 1].timestamp).getTime();
+    const buckets = 12;
+    const slot = (t1 - t0) / buckets || 1;
+    const counts = new Array(buckets).fill(0);
+    const blockedCounts = new Array(buckets).fill(0);
+
+    sorted.forEach(e => {
+      const idx = Math.min(Math.floor((new Date(e.timestamp).getTime() - t0) / slot), buckets - 1);
+      counts[idx]++;
+      if (e.status === 'blocked') blockedCounts[idx]++;
+    });
+
+    const maxCount = Math.max(...counts, 1);
+    const bw = iw / buckets;
+
+    // grid
+    ctx.strokeStyle = getCSSVar('--border');
+    ctx.lineWidth = 1;
+    [0, Math.round(maxCount / 2), maxCount].forEach(v => {
+      const y = pad.top + ih - (v / maxCount) * ih;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left + iw, y);
+      ctx.stroke();
+      ctx.fillStyle = getCSSVar('--text-dim');
+      ctx.font = '9px Share Tech Mono, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(v, pad.left - 3, y + 3);
+    });
+
+    counts.forEach((c, i) => {
+      const x = pad.left + i * bw + 1;
+      const barH = (c / maxCount) * ih;
+      const y = pad.top + ih - barH;
+
+      // approved portion
+      ctx.fillStyle = 'rgba(0,212,106,0.35)';
+      ctx.fillRect(x, y, bw - 2, barH);
+
+      // blocked overlay
+      if (blockedCounts[i] > 0) {
+        const bH = (blockedCounts[i] / maxCount) * ih;
+        ctx.fillStyle = 'rgba(255,59,92,0.6)';
+        ctx.fillRect(x, pad.top + ih - bH, bw - 2, bH);
+      }
+
+      // bar border
+      ctx.strokeStyle = getCSSVar('--border2');
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(x, y, bw - 2, barH);
+    });
+
+    // x-axis: start / end time labels
+    const fmt = ts => new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    ctx.fillStyle = getCSSVar('--text-dim');
+    ctx.font = '8px Share Tech Mono, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(fmt(t0), pad.left, h - 4);
+    ctx.textAlign = 'right';
+    ctx.fillText(fmt(t1), pad.left + iw, h - 4);
+  }
+
+  // Hook charts into renderAll
+  const _origRenderAll = renderAll;
+  renderAll = function() {
+    _origRenderAll();
+    renderCharts();
+  };
+
+  window.addEventListener('resize', () => { if (logData.length) renderCharts(); });
 </script>
 </body>
 </html>
