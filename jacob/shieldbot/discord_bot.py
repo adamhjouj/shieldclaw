@@ -181,13 +181,14 @@ def _send_and_handle_tools(thread_id: str, content: str) -> str:
             "output": result,
         })
 
-    # Submit tool outputs back to Backboard
+    # Submit tool outputs and keep going if the LLM wants more tools
     final = backboard_client.submit_tool_outputs(thread_id, run_id, tool_outputs)
 
-    # The LLM might request more tools (recursive)
-    more_tools = final.get("tool_calls")
-    more_run_id = final.get("run_id")
-    if more_tools and more_run_id:
+    for round_num in range(2, 8):
+        more_tools = final.get("tool_calls")
+        more_run_id = final.get("run_id")
+        if not more_tools or not more_run_id:
+            break
         more_outputs = []
         for tc in more_tools:
             func = tc.get("function", {})
@@ -196,7 +197,7 @@ def _send_and_handle_tools(thread_id: str, content: str) -> str:
                 args = json.loads(func.get("arguments", "{}"))
             except json.JSONDecodeError:
                 args = {}
-            print(f"[shieldbot] Tool call (round 2): {name}({args})")
+            print(f"[shieldbot] Tool call (round {round_num}): {name}({args})")
             result = execute_tool(name, args)
             more_outputs.append({"tool_call_id": tc["id"], "output": result})
         final = backboard_client.submit_tool_outputs(thread_id, more_run_id, more_outputs)
