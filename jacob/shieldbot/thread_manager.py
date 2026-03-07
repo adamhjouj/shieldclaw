@@ -1,103 +1,57 @@
-"""Thread manager — real Backboard.io threads + SQLite persistence.
+"""Thread manager — Backboard.io threads, no SQLite.
 
-Every session gets a real persistent thread on Backboard.io.
-Thread IDs are also stored in local SQLite so we can map
-session_id → Backboard thread_id across restarts.
+Every session gets a real Backboard thread tied to the user's assistant.
+Thread history is kept in-process for the current session; Backboard's
+memory layer persists the important facts across restarts automatically.
 """
 
 from __future__ import annotations
 
-import json
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from . import config, backboard_client
+from . import backboard_client
 
-
-def _conn() -> sqlite3.Connection:
-    db_path = config.get_db_path()
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _init_db(conn: sqlite3.Connection) -> None:
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS threads (
-            session_id  TEXT PRIMARY KEY,
-            thread_id   TEXT NOT NULL,
-            user_id     TEXT NOT NULL,
-            created_at  TEXT NOT NULL,
-            history     TEXT NOT NULL DEFAULT '[]'
-        )
-    """)
-    conn.commit()
+# In-process store: session_id -> thread dict
+_threads: dict[str, dict[str, Any]] = {}
 
 
 def get_or_create_thread(session_id: str, user_id: str) -> dict[str, Any]:
-    with _conn() as conn:
-        _init_db(conn)
-        row = conn.execute(
-            "SELECT * FROM threads WHERE session_id = ?", (session_id,)
-        ).fetchone()
-        if row:
-            return {
-                "thread_id": row["thread_id"],
-                "session_id": row["session_id"],
-                "user_id": row["user_id"],
-                "created_at": row["created_at"],
-                "history": json.loads(row["history"]),
-            }
+    if session_id in _threads:
+        return _threads[session_id]
 
-        # Create a real Backboard.io thread
-        try:
-            bb_thread = backboard_client.create_thread()
-            thread_id = bb_thread["thread_id"]
-        except Exception:
-            thread_id = str(uuid.uuid4())
+    try:
+        bb_thread = backboard_client.create_thread(user_id=user_id)
+        thread_id = bb_thread["thread_id"]
+    except Exception:
+        thread_id = str(uuid.uuid4())
 
-        thread = {
-            "thread_id": thread_id,
-            "session_id": session_id,
-            "user_id": user_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "history": [],
-        }
-        conn.execute(
-            "INSERT INTO threads (session_id, thread_id, user_id, created_at, history) VALUES (?,?,?,?,?)",
-            (session_id, thread_id, user_id, thread["created_at"], "[]"),
-        )
-        conn.commit()
-        return thread
+    thread = {
+        "thread_id": thread_id,
+        "session_id": session_id,
+        "user_id": user_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "history": [],
+    }
+    _threads[session_id] = thread
+    return thread
 
 
 def append_to_thread(session_id: str, entry: dict[str, Any]) -> None:
     entry["timestamp"] = datetime.now(timezone.utc).isoformat()
 
-    # Store locally in SQLite
-    with _conn() as conn:
-        _init_db(conn)
-        row = conn.execute(
-            "SELECT thread_id, history FROM threads WHERE session_id = ?", (session_id,)
-        ).fetchone()
-        if row is None:
-            return
-        history = json.loads(row["history"])
-        history.append(entry)
-        conn.execute(
-            "UPDATE threads SET history = ? WHERE session_id = ?",
-            (json.dumps(history), session_id),
-        )
-        conn.commit()
-        thread_id = row["thread_id"]
+    thread = _threads.get(session_id)
+    if thread is None:
+        return
 
-    # Also push to Backboard.io
+    thread["history"].append(entry)
+
+    # Push to Backboard with memory="Auto" so important facts are persisted
     try:
         backboard_client.add_message(
-            thread_id,
-            json.dumps(entry, default=str),
+            thread["thread_id"],
+            __import__("json").dumps(entry, default=str),
             memory="Auto",
             send_to_llm="false",
         )
@@ -106,24 +60,12 @@ def append_to_thread(session_id: str, entry: dict[str, Any]) -> None:
 
 
 def get_thread(session_id: str) -> dict[str, Any] | None:
-    with _conn() as conn:
-        _init_db(conn)
-        row = conn.execute(
-            "SELECT * FROM threads WHERE session_id = ?", (session_id,)
-        ).fetchone()
-        if row is None:
-            return None
-        return {
-            "thread_id": row["thread_id"],
-            "session_id": row["session_id"],
-            "user_id": row["user_id"],
-            "created_at": row["created_at"],
-            "history": json.loads(row["history"]),
-        }
+    return _threads.get(session_id)
+
+
+def clear_session(session_id: str) -> None:
+    _threads.pop(session_id, None)
 
 
 def clear_all() -> None:
-    with _conn() as conn:
-        _init_db(conn)
-        conn.execute("DELETE FROM threads")
-        conn.commit()
+    _threads.clear()

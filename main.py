@@ -32,6 +32,7 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 DEV_BYPASS = os.getenv("DEV_BYPASS", "").lower() in ("1", "true", "yes")
+SHIELDBOT_BYPASS = os.getenv("SHIELDBOT_BYPASS", "").lower() in ("1", "true", "yes")
 
 # Fake dev agent pre-seeded when DEV_BYPASS is on
 _DEV_AGENT = {
@@ -45,6 +46,12 @@ _DEV_AGENT = {
     "revoked": False,
 }
 _DEV_TOKEN = "dev-bypass-token"
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop approval store
+# ---------------------------------------------------------------------------
+# approval_id → {"event": asyncio.Event, "approved": bool | None, "request": dict}
+_pending_approvals: dict[str, dict] = {}
 
 
 def _maybe_register_and_exit():
@@ -79,6 +86,7 @@ AUTH0_CLIENT_ID = vault.get("AUTH0_CLIENT_ID")
 AUTH0_AUDIENCE = vault.get("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
 AUTH0_ALGORITHMS = ["RS256"]
 OPENCLAW_UPSTREAM = vault.get("OPENCLAW_UPSTREAM", "http://127.0.0.1:18789")
+OPENCLAW_TOKEN = vault.get("OPENCLAW_TOKEN", "shieldclaw-local-token")
 SHIELDCLAW_PORT = int(vault.get("SHIELDCLAW_PORT", "8443"))
 
 JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
@@ -173,11 +181,18 @@ def build_action_request(
     except (json.JSONDecodeError, UnicodeDecodeError):
         body_dict = {}
 
+    # For chat completions, don't pass raw message content to ShieldBot —
+    # user message text is not an agent action and triggers false positives.
+    if action_type == "post:chat":
+        shieldbot_payload = {"method": method, "path": path, "message_count": len(body_dict.get("messages", []))}
+    else:
+        shieldbot_payload = {"method": method, "path": path, "body": body_dict}
+
     return ActionRequest(
         user_id=user_id,
         session_id=session_id,
         action_type=action_type,
-        payload={"method": method, "path": path, "body": body_dict},
+        payload=shieldbot_payload,
     )
 
 
@@ -782,8 +797,64 @@ async def backboard_dashboard():
 
 @app.get("/shieldclaw/backboard/log")
 async def backboard_log():
-    """Return the Backboard audit log as JSON."""
-    return JSONResponse(content={"log": shieldbot_logger.get_audit_log()})
+    """Return the merged audit log as JSON.
+
+    Merges the rich trace log (has input_summary, matched_rules, etc.) with the
+    simpler audit log (has Claude reasoning). Trace log entries are normalized to
+    the same field names the dashboard expects.
+    """
+    from jacob.shieldbot import backboard as _bb
+
+    # Normalize trace log entries → dashboard field names
+    trace_entries = []
+    for t in _bb.get_trace_log():
+        trace_entries.append({
+            "timestamp":          t.get("timestamp", ""),
+            "user_id":            t.get("user_id", ""),
+            "session_id":         t.get("session_id", ""),
+            "thread_id":          t.get("thread_id", ""),
+            "trace_id":           t.get("trace_id", ""),
+            "action_type":        t.get("action_type", ""),
+            "payload":            t.get("payload", {}),
+            "status":             t.get("final_decision", "unknown"),
+            "risk_score":         t.get("risk_score", 0),
+            "reason":             t.get("final_reason", ""),
+            "factors":            t.get("detected_risk_factors", []),
+            "matched_rules":      t.get("matched_rules", []),
+            "matched_preferences":t.get("matched_preferences", []),
+            "trust_tier":         t.get("trust_tier", "medium"),
+            "input_summary":      t.get("input_summary", ""),
+            "output_summary":     t.get("output_summary", ""),
+            "reasoning":          None,  # enriched below from audit log
+        })
+
+    # Index audit log by (session_id, action_type) to pull in Claude reasoning
+    audit_index: dict[tuple, dict] = {}
+    for a in shieldbot_logger.get_audit_log():
+        key = (a.get("session_id", ""), a.get("action_type", ""))
+        audit_index[key] = a
+
+    for entry in trace_entries:
+        key = (entry["session_id"], entry["action_type"])
+        audit = audit_index.get(key)
+        if audit:
+            entry["reasoning"] = audit.get("reasoning")
+            # Fill payload from audit if missing in trace
+            if not entry["payload"]:
+                entry["payload"] = audit.get("payload", {})
+
+    # Fall back to raw audit log if trace log is empty (e.g. non-evaluator paths)
+    if not trace_entries:
+        raw = shieldbot_logger.get_audit_log()
+        for a in raw:
+            a.setdefault("trace_id", "")
+            a.setdefault("input_summary", "")
+            a.setdefault("output_summary", "")
+            a.setdefault("matched_rules", [])
+            a.setdefault("matched_preferences", [])
+        trace_entries = raw
+
+    return JSONResponse(content={"log": trace_entries})
 
 
 @app.get("/shieldclaw/backboard/config")
@@ -805,6 +876,54 @@ async def backboard_set_config(request: Request):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     return JSONResponse(content=shieldbot_config.get_config())
+
+
+# --- Human-in-the-loop approval endpoints ---
+
+def _check_internal_token(request: Request):
+    auth = request.headers.get("Authorization", "")
+    token = auth.removeprefix("Bearer ").strip()
+    if token not in (OPENCLAW_TOKEN, _DEV_TOKEN):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.get("/shieldclaw/approval/pending")
+async def approval_get_pending(request: Request):
+    """Discord bot polls this to get pending approval requests."""
+    _check_internal_token(request)
+    pending = []
+    for approval_id, entry in list(_pending_approvals.items()):
+        if entry["approved"] is None:
+            pending.append({"approval_id": approval_id, "request": entry["request"]})
+    return JSONResponse(content={"pending": pending})
+
+
+@app.post("/shieldclaw/approval/{approval_id}/resolve")
+async def approval_resolve(approval_id: str, request: Request):
+    """Discord bot calls this when admin clicks Approve or Deny."""
+    _check_internal_token(request)
+    body = await request.json()
+    approved: bool = bool(body.get("approved", False))
+
+    entry = _pending_approvals.get(approval_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Approval not found or already resolved")
+
+    entry["approved"] = approved
+    entry["event"].set()
+    return JSONResponse(content={"ok": True, "approved": approved})
+
+
+@app.post("/shieldclaw/clear-session")
+async def clear_session(request: Request):
+    """Discord bot calls this on /clear to wipe ShieldBot session history and trust tier."""
+    from jacob.shieldbot import thread_manager as _tm
+    _check_internal_token(request)
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    if session_id:
+        _tm.clear_session(session_id)
+    return JSONResponse(content={"ok": True})
 
 
 # --- Auth0 Debug Dashboard ---
@@ -1102,31 +1221,57 @@ async def proxy(request: Request, path: str):
         except Exception:
             pass
 
-        if decision.status == "needs_confirmation":
-            import uuid as _uuid
-            from discord_onboarding import request_discord_approval
-            request_id = _uuid.uuid4().hex[:12]
-            approved = await request_discord_approval(
-                request_id=request_id,
-                agent_name=identity.get("agent_name", "unknown"),
-                action_type=action_req.action_type,
-                reason=decision.reason,
-                risk_score=decision.risk_score,
-                factors=decision.factors,
-            )
+        async def _request_human_approval() -> bool:
+            """Create a pending approval, wait up to 60s, return True if approved."""
+            approval_id = str(uuid.uuid4())[:8].upper()
+            event = asyncio.Event()
+            _pending_approvals[approval_id] = {
+                "event": event,
+                "approved": None,
+                "request": {
+                    "method": request.method,
+                    "path": request_path,
+                    "action_type": action_req.action_type,
+                    "reason": decision.reason,
+                    "risk_score": decision.risk_score,
+                    "agent_name": identity.get("agent_name", "unknown"),
+                },
+            }
+            logger.info(f"[ShieldBot] Awaiting Discord approval (id={approval_id}, risk={decision.risk_score:.0f})")
+            timed_out = False
+            try:
+                await asyncio.wait_for(event.wait(), timeout=90.0)
+                approved = _pending_approvals[approval_id]["approved"]
+            except asyncio.TimeoutError:
+                timed_out = True
+                approved = False
+            finally:
+                _pending_approvals.pop(approval_id, None)
+
+            if timed_out:
+                log_request(identity, token_scopes, request.method, request_path, 403)
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"[ShieldBot] Approval timed out after 90s — request auto-denied (risk={decision.risk_score:.0f})",
+                )
             if not approved:
                 log_request(identity, token_scopes, request.method, request_path, 403)
                 raise HTTPException(
                     status_code=403,
-                    detail=f"[ShieldBot] Action denied via Discord (risk={decision.risk_score:.0f})",
+                    detail=f"[ShieldBot] Request denied by admin (risk={decision.risk_score:.0f})",
                 )
+            logger.info(f"[ShieldBot] Admin approved request {approval_id}")
+            return True
+
+        if decision.status == "needs_confirmation":
+            if decision.risk_score >= 50:
+                await _request_human_approval()
+            else:
+                logger.info(f"[ShieldBot] needs_confirmation risk={decision.risk_score:.0f} < 50, auto-approving")
 
         elif decision.status == "blocked":
-            log_request(identity, token_scopes, request.method, request_path, 403)
-            raise HTTPException(
-                status_code=403,
-                detail=f"[ShieldBot] {decision.reason} (risk={decision.risk_score:.0f}, factors={decision.factors})",
-            )
+            logger.warning(f"[ShieldBot] BLOCKED — sending to Discord for approval (reason={decision.reason!r} risk={decision.risk_score})")
+            await _request_human_approval()
 
     # Build upstream headers — set identity for OpenClaw trusted-proxy mode
     upstream_headers = dict(request.headers)
@@ -1139,9 +1284,10 @@ async def proxy(request: Request, path: str):
         upstream_headers["X-Agent-Name"] = identity.get("agent_name", "")
         upstream_headers["X-Agent-Owner"] = identity.get("owner_sub", "")
 
-    # Don't forward the JWT itself to OpenClaw
+    # Don't forward the JWT itself to OpenClaw — replace with OpenClaw's expected token
     upstream_headers.pop("authorization", None)
     upstream_headers.pop("host", None)
+    upstream_headers["authorization"] = f"Bearer {OPENCLAW_TOKEN}"
 
     # Proxy to OpenClaw gateway
     upstream_url = f"{OPENCLAW_UPSTREAM}/{path}"
@@ -1161,8 +1307,27 @@ async def proxy(request: Request, path: str):
 
     log_request(identity, token_scopes, request.method, request_path, response.status_code)
 
-    # --- Data Isolation: redact sensitive content for agent identities ---
+    # --- Scrub OpenClaw exec-lock / gateway-restart leaks from chat responses ---
     response_body = response.content
+    _EXEC_LEAK_PHRASES = [
+        b"gateway restart", b"openclaw gateway", b"exec tool", b"allowlist",
+        b"open your terminal", b"run `openclaw", b"security allowlist",
+        b"won't unlock", b"will not unlock", b"locked down",
+    ]
+    if response.status_code == 200 and "chat/completions" in request_path:
+        try:
+            body_lower = response_body.lower()
+            if any(p in body_lower for p in _EXEC_LEAK_PHRASES):
+                body_json = json.loads(response_body)
+                if "choices" in body_json:
+                    for choice in body_json["choices"]:
+                        if "message" in choice and "content" in choice["message"]:
+                            choice["message"]["content"] = "I'm not able to complete that action right now."
+                    response_body = json.dumps(body_json).encode()
+        except Exception:
+            pass
+
+    # --- Data Isolation: redact sensitive content for agent identities ---
     if identity["is_agent"]:
         _cid = identity.get("agent_client_id", "")
         if DEV_BYPASS and _cid == _DEV_AGENT["auth0_client_id"]:
