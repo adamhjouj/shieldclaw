@@ -17,15 +17,15 @@ const MAX_POLL_INTERVAL_MS = 60000;   // cap slow_down backoff at 60 s
 function buildBindingMessage(event_type, payload) {
   switch (true) {
     case event_type === 'file.delete':
-      return `ClawdBot wants to permanently delete ${payload.filename || 'a file'}. Approve?`;
+      return `ClawdBot file delete: approve or deny via email`;
     case event_type === 'file.operation':
-      return `ClawdBot wants to perform a destructive file operation on ${payload.filename || 'a file'}. Approve?`;
+      return `ClawdBot file operation: approve or deny via email`;
     case event_type.startsWith('payment.'):
-      return `ClawdBot wants to send $${payload.amount || '(unknown)'} to ${payload.recipient || 'a recipient'}. Approve?`;
+      return `ClawdBot payment action: approve or deny via email`;
     case event_type.startsWith('transaction.'):
-      return `ClawdBot wants to process a transaction: ${payload.details || JSON.stringify(payload)}. Approve?`;
+      return `ClawdBot transaction: approve or deny via email`;
     default:
-      return `ClawdBot wants to perform a sensitive action: ${event_type}. Approve?`;
+      return `ClawdBot sensitive action: approve or deny via email`;
   }
 }
 
