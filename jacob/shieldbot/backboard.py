@@ -1,11 +1,7 @@
-"""Backboard abstraction layer.
+"""Backboard abstraction layer — real Backboard.io integration.
 
-Clean wrapper for thread management, memory, and decision trace logging.
-Currently backed by local in-memory stores. Swap the implementation functions
-to point at real Backboard.io API calls when ready.
-
-This module is the single integration point — nothing else in shieldbot
-should talk to Backboard directly.
+All threads, memory, and decision traces go to Backboard.io.
+This module is the single integration point for the rest of shieldbot.
 """
 
 from __future__ import annotations
@@ -13,18 +9,23 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from . import thread_manager, memory
+from . import thread_manager, memory, backboard_client
 from .trace import DecisionTrace
 from .capture import InteractionRecord
+
+
+def is_connected() -> bool:
+    return backboard_client.is_configured()
+
+
+def connection_status() -> str:
+    return f"CONNECTED → {backboard_client.BASE_URL} (assistant: {backboard_client.ASSISTANT_ID})"
 
 
 # ── Threads ──
 
 def get_or_create_thread(user_id: str, session_id: str, action_type: str = "") -> dict[str, Any]:
-    thread = thread_manager.get_or_create_thread(session_id, user_id)
-    if action_type:
-        thread.setdefault("last_action_type", action_type)
-    return thread
+    return thread_manager.get_or_create_thread(session_id, user_id)
 
 
 def append_thread_event(thread_id: str, session_id: str, event: dict[str, Any]) -> None:
@@ -80,11 +81,20 @@ def get_trace_log() -> list[dict[str, Any]]:
 # ── Full interaction recording ──
 
 def record_interaction(session_id: str, record: InteractionRecord) -> None:
-    """Store a full OpenClaw interaction (input + output + decision) in the thread."""
     thread_manager.append_to_thread(session_id, {
         "event_type": "openclaw_interaction",
         **record.to_dict(),
     })
+
+
+# ── Backboard state queries ──
+
+def get_all_memories() -> dict[str, Any]:
+    return backboard_client.list_memories()
+
+
+def get_backboard_thread(thread_id: str) -> dict[str, Any]:
+    return backboard_client.get_thread(thread_id)
 
 
 # ── Reset ──

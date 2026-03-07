@@ -66,6 +66,8 @@ def run_demo():
     print(f"\n{DIVIDER}")
     print("  SHIELDBOT v2 — OpenClaw Capture + Decision Trace Demo")
     print(DIVIDER)
+    print(f"  Backboard.io  : {backboard.connection_status()}")
+    print(DIVIDER)
 
     scenarios = [
         {
@@ -183,6 +185,22 @@ def run_demo():
                     print(f"    [{etype}] {inp.get('action_type', '?')} → {dec.get('status', '?')}")
                 else:
                     print(f"    [{etype}] {h.get('status', '?')} (risk {h.get('risk_score', '?')})")
+    print(DIVIDER)
+
+    # ── Real Backboard.io state ──
+    print(f"\n{DIVIDER}")
+    print("  BACKBOARD.IO — STORED MEMORIES")
+    print(DIVIDER)
+    try:
+        mem_resp = backboard.get_all_memories()
+        memories = mem_resp.get("memories", [])
+        print(f"  Total memories on Backboard.io: {mem_resp.get('total_count', len(memories))}")
+        for m in memories[-8:]:
+            meta = m.get("metadata") or {}
+            content = m.get("content", "")[:60]
+            print(f"    [{meta.get('type', '?'):>10}] {meta.get('user_id', '?')}: {content}")
+    except Exception as exc:
+        print(f"  Error fetching memories: {exc}")
     print(DIVIDER + "\n")
 
 
