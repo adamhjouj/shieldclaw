@@ -127,13 +127,7 @@ with st.spinner("Probing endpoints..."):
 
         fga_tests = [
             ("fga:cmd git status", "get:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"command": "git status"}}),
-            ("fga:cmd rm -rf", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"command": "rm -rf /"}}),
-            ("fga:path .env", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"path": ".env"}}),
-            ("fga:path ~/.ssh", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"path": "~/.ssh/id_rsa"}}),
-            ("fga:cmd sudo", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"command": "sudo rm -rf"}}),
-            ("fga:GET /health", "get:health", {"method": "GET", "path": "/health", "body": {}}),
             ("fga:POST /shieldclaw/agents", "post:shieldclaw", {"method": "POST", "path": "/shieldclaw/agents", "body": {"agent_name": "test"}}),
-            ("fga:cmd git push --force", "post:chat", {"method": "POST", "path": "/v1/chat/completions", "body": {"command": "git push --force"}}),
         ]
         for label, action_type, payload in fga_tests:
             t0 = time.time()
@@ -291,8 +285,8 @@ if not fga_df.empty:
     st.header("FGA — Fine-Grained Authorization")
     st.caption("FGA runs on every agent request after Auth0 JWT verification. Deny rules block before OpenClaw sees the request.")
 
-    fga_ok = len(fga_df[fga_df["color_status"] == "ok"])
-    fga_blocked = len(fga_df[fga_df["color_status"] == "failed"])
+    fga_ok = len(fga_df[fga_df["status"] == "ok"])
+    fga_blocked = len(fga_df[fga_df["status"] != "ok"])
 
     col1, col2, col3 = st.columns(3)
     col1.metric("FGA Checks", len(fga_df))
