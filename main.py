@@ -1074,6 +1074,14 @@ async def discord_auth0_get_token(discord_user_id: str, request: Request):
 
 # --- Auth0 Debug Dashboard ---
 
+@app.get("/shieldclaw/analytics", response_class=HTMLResponse)
+async def analytics_dashboard():
+    """Serve the analytics dashboard with graphs."""
+    dashboard_path = __file__.replace("main.py", "analytics_dashboard.html")
+    with open(dashboard_path) as f:
+        return HTMLResponse(content=f.read())
+
+
 @app.get("/shieldclaw/auth0", response_class=HTMLResponse)
 async def auth0_dashboard():
     """Serve the Auth0 debug dashboard."""

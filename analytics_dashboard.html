@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShieldClaw // Analytics</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  :root {
+    --bg:        #080a0c;
+    --bg2:       #0d1117;
+    --bg3:       #111820;
+    --border:    #1e2d3d;
+    --border2:   #243447;
+    --text:      #8faacc;
+    --text-dim:  #3d5470;
+    --text-bright:#c8dff5;
+    --amber:     #f0a500;
+    --green:     #00d46a;
+    --red:       #ff3b5c;
+    --accent:    #0af;
+    --purple:    #b060ff;
+    --purple-dim:#2a0060;
+    --font-mono: 'Share Tech Mono', 'Courier New', monospace;
+    --font-hud:  'Orbitron', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 13px; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px);
+    pointer-events: none; z-index: 9999;
+  }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0a1520 0%, var(--bg) 100%);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .header-left { display: flex; align-items: center; gap: 14px; }
+
+  .shield-icon {
+    width: 34px; height: 34px;
+    border: 2px solid var(--purple);
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--purple-dim);
+    box-shadow: 0 0 16px rgba(176,96,255,0.35);
+  }
+  .shield-icon svg { width: 16px; height: 16px; fill: var(--purple); }
+
+  .wordmark { font-family: var(--font-hud); font-size: 1rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-bright); line-height: 1; }
+  .wordmark span { color: var(--purple); font-size: 0.65rem; display: block; letter-spacing: 0.3em; font-weight: 400; margin-top: 2px; }
+
+  .nav-links { display: flex; gap: 12px; }
+  .nav-link {
+    font-size: 0.7rem; letter-spacing: 0.18em;
+    padding: 6px 14px; border: 1px solid var(--border2);
+    color: var(--text-dim); text-decoration: none;
+    font-family: var(--font-mono); transition: all 0.15s;
+  }
+  .nav-link:hover { border-color: var(--accent); color: var(--accent); }
+  .nav-link.active { border-color: var(--purple); color: var(--purple); }
+
+  .header-right { display: flex; align-items: center; gap: 10px; }
+  .refresh-btn {
+    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.15em;
+    padding: 7px 14px; border: 1px solid var(--purple); color: var(--purple);
+    background: transparent; cursor: pointer; transition: all 0.15s;
+  }
+  .refresh-btn:hover { background: var(--purple); color: var(--bg); box-shadow: 0 0 14px rgba(176,96,255,0.4); }
+
+  .live-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-dim); flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .live-dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse-dot 2s ease-in-out infinite; }
+  @keyframes pulse-dot { 0%,100% { box-shadow: 0 0 4px var(--green) } 50% { box-shadow: 0 0 14px var(--green) } }
+  .live-text { font-size: 0.65rem; letter-spacing: 0.15em; color: var(--text-dim); }
+
+  /* ── METRICS BAR ── */
+  .metrics-bar {
+    display: grid; grid-template-columns: repeat(6, 1fr);
+    border-bottom: 1px solid var(--border);
+  }
+  .metric-tile {
+    padding: 16px 20px;
+    border-right: 1px solid var(--border);
+    position: relative;
+  }
+  .metric-tile:last-child { border-right: none; }
+  .metric-tile::after {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+    background: var(--border2);
+  }
+  .metric-label { font-size: 0.55rem; letter-spacing: 0.28em; color: var(--text-dim); margin-bottom: 4px; }
+  .metric-value { font-family: var(--font-hud); font-size: 1.4rem; font-weight: 900; letter-spacing: 0.05em; }
+  .metric-sub { font-size: 0.6rem; color: var(--text-dim); margin-top: 2px; }
+  .metric-tile.green .metric-value { color: var(--green); }
+  .metric-tile.green::after { background: var(--green); }
+  .metric-tile.red .metric-value { color: var(--red); }
+  .metric-tile.red::after { background: var(--red); }
+  .metric-tile.amber .metric-value { color: var(--amber); }
+  .metric-tile.amber::after { background: var(--amber); }
+  .metric-tile.accent .metric-value { color: var(--accent); }
+  .metric-tile.accent::after { background: var(--accent); }
+  .metric-tile.purple .metric-value { color: var(--purple); }
+  .metric-tile.purple::after { background: var(--purple); }
+
+  /* ── CHART GRID ── */
+  .chart-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .chart-panel {
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    min-height: 300px;
+  }
+  .chart-panel:nth-child(2n) { border-right: none; }
+  .chart-panel.full { grid-column: 1 / -1; border-right: none; }
+
+  .chart-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 18px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.58rem; letter-spacing: 0.3em; color: var(--text-dim);
+  }
+  .chart-body { padding: 14px 18px; position: relative; }
+  .chart-body canvas { max-height: 280px; }
+
+  /* ── TABLE ── */
+  .log-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+  .log-table th {
+    text-align: left; padding: 8px 12px;
+    font-size: 0.58rem; letter-spacing: 0.25em; color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2); position: sticky; top: 0;
+  }
+  .log-table td { padding: 7px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .log-table tr:hover { background: rgba(0,170,255,0.03); }
+
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; font-size: 0.6rem; letter-spacing: 0.12em; border: 1px solid;
+  }
+  .status-badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; }
+  .status-approved { color: var(--green); border-color: rgba(0,212,106,0.3); }
+  .status-approved::before { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .status-blocked { color: var(--red); border-color: rgba(255,59,92,0.3); }
+  .status-blocked::before { background: var(--red); box-shadow: 0 0 5px var(--red); }
+  .status-needs_confirmation { color: var(--amber); border-color: rgba(240,165,0,0.3); }
+  .status-needs_confirmation::before { background: var(--amber); }
+  .status-unknown { color: var(--text-dim); border-color: var(--border2); }
+  .status-unknown::before { background: var(--text-dim); }
+
+  .risk-bar { width: 60px; height: 6px; background: var(--bg3); border: 1px solid var(--border); display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .risk-bar-fill { height: 100%; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text-dim); }
+  .empty-state .big { font-family: var(--font-hud); font-size: 1.2rem; color: var(--text); margin-bottom: 8px; }
+
+  .scroll-wrap { max-height: 420px; overflow-y: auto; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="shield-icon">
+      <svg viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.5 3.4 10.7 8 12 4.6-1.3 8-6.5 8-12V6l-8-4z"/></svg>
+    </div>
+    <div class="wordmark">
+      SHIELDCLAW
+      <span>ANALYTICS</span>
+    </div>
+  </div>
+
+  <div class="nav-links">
+    <a class="nav-link" href="/shieldclaw/backboard">BACKBOARD</a>
+    <a class="nav-link" href="/shieldclaw/auth0">AUTH0 DEBUG</a>
+    <a class="nav-link active" href="/shieldclaw/analytics">ANALYTICS</a>
+    <a class="nav-link" href="/health">/health</a>
+  </div>
+
+  <div class="header-right">
+    <div class="live-dot" id="liveDot"></div>
+    <div class="live-text" id="liveText">LOADING...</div>
+    <button class="refresh-btn" onclick="loadAll()">REFRESH</button>
+  </div>
+</header>
+
+<!-- METRICS -->
+<div class="metrics-bar" id="metricsBar">
+  <div class="metric-tile accent"><div class="metric-label">TOTAL DECISIONS</div><div class="metric-value" id="mTotal">--</div><div class="metric-sub">this session</div></div>
+  <div class="metric-tile green"><div class="metric-label">APPROVED</div><div class="metric-value" id="mApproved">--</div><div class="metric-sub" id="mApprovedPct">--</div></div>
+  <div class="metric-tile red"><div class="metric-label">BLOCKED</div><div class="metric-value" id="mBlocked">--</div><div class="metric-sub" id="mBlockedPct">--</div></div>
+  <div class="metric-tile amber"><div class="metric-label">NEEDS CONFIRM</div><div class="metric-value" id="mConfirm">--</div><div class="metric-sub" id="mConfirmPct">--</div></div>
+  <div class="metric-tile purple"><div class="metric-label">AVG RISK SCORE</div><div class="metric-value" id="mAvgRisk">--</div><div class="metric-sub">out of 100</div></div>
+  <div class="metric-tile accent"><div class="metric-label">UNIQUE AGENTS</div><div class="metric-value" id="mAgents">--</div><div class="metric-sub" id="mAgentsSub">--</div></div>
+</div>
+
+<!-- CHARTS -->
+<div class="chart-grid">
+
+  <!-- Risk over time -->
+  <div class="chart-panel full">
+    <div class="chart-header">RISK SCORE TIMELINE</div>
+    <div class="chart-body"><canvas id="chartTimeline"></canvas></div>
+  </div>
+
+  <!-- Decision distribution -->
+  <div class="chart-panel">
+    <div class="chart-header">DECISION DISTRIBUTION</div>
+    <div class="chart-body"><canvas id="chartPie"></canvas></div>
+  </div>
+
+  <!-- Action types -->
+  <div class="chart-panel">
+    <div class="chart-header">TOP ACTION TYPES</div>
+    <div class="chart-body"><canvas id="chartActions"></canvas></div>
+  </div>
+
+  <!-- Risk factor frequency -->
+  <div class="chart-panel">
+    <div class="chart-header">TOP RISK FACTORS</div>
+    <div class="chart-body"><canvas id="chartFactors"></canvas></div>
+  </div>
+
+  <!-- Decisions per agent -->
+  <div class="chart-panel">
+    <div class="chart-header">DECISIONS PER AGENT</div>
+    <div class="chart-body"><canvas id="chartAgents"></canvas></div>
+  </div>
+
+  <!-- Risk distribution histogram -->
+  <div class="chart-panel">
+    <div class="chart-header">RISK SCORE DISTRIBUTION</div>
+    <div class="chart-body"><canvas id="chartHist"></canvas></div>
+  </div>
+
+  <!-- Trust tier over time -->
+  <div class="chart-panel">
+    <div class="chart-header">TRUST TIER BREAKDOWN</div>
+    <div class="chart-body"><canvas id="chartTiers"></canvas></div>
+  </div>
+
+  <!-- Recent log table -->
+  <div class="chart-panel full">
+    <div class="chart-header">RECENT DECISIONS (last 100)</div>
+    <div class="chart-body">
+      <div class="scroll-wrap" id="logTableWrap"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Chart.js defaults ──
+Chart.defaults.color = '#8faacc';
+Chart.defaults.borderColor = '#1e2d3d';
+Chart.defaults.font.family = "'Share Tech Mono', monospace";
+Chart.defaults.font.size = 11;
+Chart.defaults.plugins.legend.labels.boxWidth = 12;
+Chart.defaults.plugins.legend.labels.padding = 14;
+
+const STATUS_COLORS = {
+  approved: '#00d46a',
+  needs_confirmation: '#f0a500',
+  blocked: '#ff3b5c',
+  unknown: '#3d5470',
+};
+
+let charts = {};
+let logData = [];
+
+async function loadAll() {
+  document.getElementById('liveText').textContent = 'FETCHING...';
+  try {
+    const res = await fetch('/shieldclaw/backboard/log');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    logData = (json.log || []).map(e => {
+      e._ts = e.timestamp ? new Date(e.timestamp) : new Date();
+      return e;
+    }).sort((a, b) => a._ts - b._ts);
+
+    renderMetrics();
+    renderTimeline();
+    renderPie();
+    renderActions();
+    renderFactors();
+    renderAgents();
+    renderHist();
+    renderTiers();
+    renderTable();
+
+    document.getElementById('liveDot').classList.add('on');
+    document.getElementById('liveText').textContent = 'LIVE \u00b7 ' + new Date().toLocaleTimeString('en-US', {hour12: false});
+  } catch (e) {
+    document.getElementById('liveDot').classList.remove('on');
+    document.getElementById('liveText').textContent = 'ERROR: ' + e.message;
+  }
+}
+
+function renderMetrics() {
+  const total = logData.length;
+  const approved = logData.filter(e => e.status === 'approved').length;
+  const blocked = logData.filter(e => e.status === 'blocked').length;
+  const confirm = logData.filter(e => e.status === 'needs_confirmation').length;
+  const avgRisk = total ? (logData.reduce((s, e) => s + (e.risk_score || 0), 0) / total) : 0;
+  const agents = new Set(logData.map(e => e.user_id || 'unknown'));
+
+  document.getElementById('mTotal').textContent = total;
+  document.getElementById('mApproved').textContent = approved;
+  document.getElementById('mApprovedPct').textContent = total ? (approved / total * 100).toFixed(0) + '% pass rate' : '--';
+  document.getElementById('mBlocked').textContent = blocked;
+  document.getElementById('mBlockedPct').textContent = total ? (blocked / total * 100).toFixed(0) + '% block rate' : '--';
+  document.getElementById('mConfirm').textContent = confirm;
+  document.getElementById('mConfirmPct').textContent = total ? (confirm / total * 100).toFixed(0) + '% escalated' : '--';
+  document.getElementById('mAvgRisk').textContent = avgRisk.toFixed(0);
+  document.getElementById('mAgents').textContent = agents.size;
+  document.getElementById('mAgentsSub').textContent = 'unique identities';
+}
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+// ── Timeline: risk score scatter over time ──
+function renderTimeline() {
+  destroyChart('timeline');
+  const datasets = {};
+  for (const e of logData) {
+    const s = e.status || 'unknown';
+    if (!datasets[s]) datasets[s] = { label: s.toUpperCase(), data: [], backgroundColor: STATUS_COLORS[s] || '#3d5470', borderColor: STATUS_COLORS[s] || '#3d5470', pointRadius: 5, pointHoverRadius: 8, showLine: true, borderWidth: 1.5, tension: 0.3 };
+    datasets[s].data.push({ x: e._ts, y: e.risk_score || 0 });
+  }
+  charts.timeline = new Chart(document.getElementById('chartTimeline'), {
+    type: 'scatter',
+    data: { datasets: Object.values(datasets) },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { type: 'time', time: { tooltipFormat: 'HH:mm:ss', displayFormats: { minute: 'HH:mm', hour: 'HH:mm' } }, grid: { color: '#1e2d3d' } },
+        y: { min: 0, max: 100, title: { display: true, text: 'RISK SCORE' }, grid: { color: '#1e2d3d' } },
+      },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            afterLabel: function(ctx) {
+              const e = logData.filter(d => d.status === ctx.dataset.label.toLowerCase())[ctx.dataIndex];
+              return e ? 'Action: ' + (e.action_type || '?') + '\nUser: ' + (e.user_id || '?') : '';
+            }
+          }
+        },
+        annotation: undefined,
+      },
+    },
+  });
+}
+
+// ── Pie: decision breakdown ──
+function renderPie() {
+  destroyChart('pie');
+  const counts = {};
+  for (const e of logData) { const s = e.status || 'unknown'; counts[s] = (counts[s] || 0) + 1; }
+  const labels = Object.keys(counts);
+  charts.pie = new Chart(document.getElementById('chartPie'), {
+    type: 'doughnut',
+    data: {
+      labels: labels.map(l => l.toUpperCase()),
+      datasets: [{
+        data: labels.map(l => counts[l]),
+        backgroundColor: labels.map(l => STATUS_COLORS[l] || '#3d5470'),
+        borderColor: '#080a0c', borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '55%',
+      plugins: { legend: { position: 'bottom' } },
+    },
+  });
+}
+
+// ── Bar: top action types ──
+function renderActions() {
+  destroyChart('actions');
+  const counts = {};
+  for (const e of logData) { const a = e.action_type || 'unknown'; counts[a] = (counts[a] || 0) + 1; }
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  charts.actions = new Chart(document.getElementById('chartActions'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(s => s[0]),
+      datasets: [{
+        label: 'Count',
+        data: sorted.map(s => s[1]),
+        backgroundColor: '#0af',
+        borderColor: '#0af', borderWidth: 0, borderRadius: 2,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      indexAxis: 'y',
+      scales: { x: { grid: { color: '#1e2d3d' } }, y: { grid: { display: false } } },
+      plugins: { legend: { display: false } },
+    },
+  });
+}
+
+// ── Bar: top risk factors ──
+function renderFactors() {
+  destroyChart('factors');
+  const counts = {};
+  for (const e of logData) {
+    for (const f of (e.factors || [])) { counts[f] = (counts[f] || 0) + 1; }
+  }
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  if (!sorted.length) {
+    document.getElementById('chartFactors').parentElement.innerHTML = '<div class="empty-state"><div class="big">NO RISK FACTORS</div>No factors flagged yet</div>';
+    return;
+  }
+  charts.factors = new Chart(document.getElementById('chartFactors'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(s => s[0].length > 30 ? s[0].slice(0, 28) + '...' : s[0]),
+      datasets: [{
+        label: 'Times Cited',
+        data: sorted.map(s => s[1]),
+        backgroundColor: '#ff3b5c',
+        borderWidth: 0, borderRadius: 2,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      indexAxis: 'y',
+      scales: { x: { grid: { color: '#1e2d3d' } }, y: { grid: { display: false } } },
+      plugins: { legend: { display: false } },
+    },
+  });
+}
+
+// ── Bar: per-agent decisions ──
+function renderAgents() {
+  destroyChart('agents');
+  const agentStats = {};
+  for (const e of logData) {
+    const u = e.user_id || 'unknown';
+    if (!agentStats[u]) agentStats[u] = { approved: 0, blocked: 0, needs_confirmation: 0 };
+    const s = e.status || 'unknown';
+    if (agentStats[u][s] !== undefined) agentStats[u][s]++;
+  }
+  const labels = Object.keys(agentStats).slice(0, 10);
+  charts.agents = new Chart(document.getElementById('chartAgents'), {
+    type: 'bar',
+    data: {
+      labels: labels.map(l => l.length > 20 ? l.slice(0, 18) + '...' : l),
+      datasets: [
+        { label: 'APPROVED', data: labels.map(l => agentStats[l].approved), backgroundColor: '#00d46a', borderRadius: 2 },
+        { label: 'CONFIRM', data: labels.map(l => agentStats[l].needs_confirmation), backgroundColor: '#f0a500', borderRadius: 2 },
+        { label: 'BLOCKED', data: labels.map(l => agentStats[l].blocked), backgroundColor: '#ff3b5c', borderRadius: 2 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, grid: { color: '#1e2d3d' } } },
+      plugins: { legend: { position: 'bottom' } },
+    },
+  });
+}
+
+// ── Histogram: risk score distribution ──
+function renderHist() {
+  destroyChart('hist');
+  const buckets = Array(10).fill(0); // 0-9, 10-19, ..., 90-100
+  for (const e of logData) {
+    const r = Math.min(Math.floor((e.risk_score || 0) / 10), 9);
+    buckets[r]++;
+  }
+  const labels = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'];
+  const colors = labels.map((_, i) => {
+    if (i < 3) return '#00d46a';
+    if (i < 5) return '#f0a500';
+    if (i < 7) return '#ff8c00';
+    return '#ff3b5c';
+  });
+  charts.hist = new Chart(document.getElementById('chartHist'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'Decisions', data: buckets, backgroundColor: colors, borderWidth: 0, borderRadius: 2 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: { title: { display: true, text: 'RISK SCORE RANGE' }, grid: { display: false } }, y: { title: { display: true, text: 'COUNT' }, grid: { color: '#1e2d3d' } } },
+      plugins: { legend: { display: false } },
+    },
+  });
+}
+
+// ── Doughnut: trust tier breakdown ──
+function renderTiers() {
+  destroyChart('tiers');
+  const counts = { high: 0, medium: 0, low: 0 };
+  for (const e of logData) { const t = e.trust_tier || 'medium'; if (counts[t] !== undefined) counts[t]++; }
+  charts.tiers = new Chart(document.getElementById('chartTiers'), {
+    type: 'doughnut',
+    data: {
+      labels: ['HIGH (trusted)', 'MEDIUM', 'LOW (restricted)'],
+      datasets: [{
+        data: [counts.high, counts.medium, counts.low],
+        backgroundColor: ['#00d46a', '#f0a500', '#ff3b5c'],
+        borderColor: '#080a0c', borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '55%',
+      plugins: { legend: { position: 'bottom' } },
+    },
+  });
+}
+
+// ── Table: recent decisions ──
+function renderTable() {
+  const wrap = document.getElementById('logTableWrap');
+  const recent = logData.slice().reverse().slice(0, 100);
+  if (!recent.length) {
+    wrap.innerHTML = '<div class="empty-state"><div class="big">NO DATA YET</div>Send requests through ShieldClaw to see analytics here</div>';
+    return;
+  }
+  let html = '<table class="log-table"><thead><tr><th>TIME</th><th>STATUS</th><th>RISK</th><th>ACTION</th><th>USER / AGENT</th><th>REASON</th></tr></thead><tbody>';
+  for (const e of recent) {
+    const ts = e._ts.toLocaleTimeString('en-US', { hour12: false });
+    const status = e.status || 'unknown';
+    const risk = e.risk_score || 0;
+    const riskColor = risk < 30 ? '#00d46a' : risk < 70 ? '#f0a500' : '#ff3b5c';
+    html += `<tr>
+      <td style="color:var(--text-dim);white-space:nowrap;font-size:0.7rem">${esc(ts)}</td>
+      <td><span class="status-badge status-${status}">${status.toUpperCase().replace('_', ' ')}</span></td>
+      <td style="white-space:nowrap">
+        <span class="risk-bar"><span class="risk-bar-fill" style="width:${risk}%;background:${riskColor}"></span></span>
+        <span style="color:${riskColor};font-size:0.75rem;font-weight:bold">${risk}</span>
+      </td>
+      <td style="color:var(--accent);font-size:0.72rem">${esc(e.action_type || '?')}</td>
+      <td style="color:var(--text);font-size:0.72rem;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.user_id || '')}">${esc(e.user_id || '?')}</td>
+      <td style="color:var(--text-dim);font-size:0.68rem;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.reason || '')}">${esc(e.reason || '--')}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+loadAll();
+setInterval(loadAll, 10000);
+</script>
+</body>
+</html>
