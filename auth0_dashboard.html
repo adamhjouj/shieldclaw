@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShieldClaw // Auth0 Debug</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  :root {
+    --bg:         #080a0c;
+    --bg2:        #0d1117;
+    --bg3:        #111820;
+    --border:     #1e2d3d;
+    --border2:    #243447;
+    --text:       #8faacc;
+    --text-dim:   #3d5470;
+    --text-bright:#c8dff5;
+    --amber:      #f0a500;
+    --amber-dim:  #7a5300;
+    --green:      #00d46a;
+    --green-dim:  #004d27;
+    --red:        #ff3b5c;
+    --red-dim:    #5c0018;
+    --yellow:     #f0c000;
+    --accent:     #0af;
+    --accent-dim: #003344;
+    --purple:     #b060ff;
+    --purple-dim: #2a0060;
+    --font-mono:  'Share Tech Mono', 'Courier New', monospace;
+    --font-hud:   'Orbitron', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 13px; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px);
+    pointer-events: none; z-index: 9999;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0a1520 0%, var(--bg) 100%);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .header-left { display: flex; align-items: center; gap: 14px; }
+
+  .shield-icon {
+    width: 34px; height: 34px;
+    border: 2px solid var(--purple);
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--purple-dim);
+    box-shadow: 0 0 16px rgba(176,96,255,0.35);
+  }
+
+  .shield-icon svg { width: 16px; height: 16px; fill: var(--purple); }
+
+  .wordmark { font-family: var(--font-hud); font-size: 1rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-bright); line-height: 1; }
+  .wordmark span { color: var(--purple); font-size: 0.65rem; display: block; letter-spacing: 0.3em; font-weight: 400; margin-top: 2px; }
+
+  .nav-links { display: flex; gap: 12px; }
+  .nav-link {
+    font-size: 0.7rem; letter-spacing: 0.18em;
+    padding: 6px 14px;
+    border: 1px solid var(--border2);
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+  .nav-link:hover { border-color: var(--accent); color: var(--accent); }
+  .nav-link.active { border-color: var(--purple); color: var(--purple); }
+
+  .header-right { display: flex; align-items: center; gap: 10px; }
+
+  .refresh-btn {
+    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.15em;
+    padding: 7px 14px; border: 1px solid var(--purple); color: var(--purple);
+    background: transparent; cursor: pointer; transition: all 0.15s;
+  }
+  .refresh-btn:hover { background: var(--purple); color: var(--bg); box-shadow: 0 0 14px rgba(176,96,255,0.4); }
+
+  .live-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-dim); flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .live-dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse-dot 2s ease-in-out infinite; }
+  @keyframes pulse-dot { 0%,100% { box-shadow: 0 0 4px var(--green) } 50% { box-shadow: 0 0 14px var(--green) } }
+
+  .live-text { font-size: 0.65rem; letter-spacing: 0.15em; color: var(--text-dim); }
+
+  /* ── HEALTH BAR ── */
+  .health-bar {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .health-tile {
+    padding: 14px 20px;
+    border-right: 1px solid var(--border);
+    position: relative; overflow: hidden;
+  }
+  .health-tile:last-child { border-right: none; }
+  .health-tile::after {
+    content: '';
+    position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+    background: var(--border2);
+    transition: background 0.4s;
+  }
+  .health-tile.ok::after    { background: var(--green); }
+  .health-tile.warn::after  { background: var(--amber); }
+  .health-tile.error::after { background: var(--red); }
+  .health-tile.info::after  { background: var(--accent); }
+
+  .health-label { font-size: 0.55rem; letter-spacing: 0.28em; color: var(--text-dim); margin-bottom: 5px; }
+  .health-value { font-family: var(--font-hud); font-size: 0.85rem; font-weight: 700; letter-spacing: 0.05em; transition: color 0.3s; }
+  .health-tile.ok .health-value    { color: var(--green); }
+  .health-tile.warn .health-value  { color: var(--amber); }
+  .health-tile.error .health-value { color: var(--red); }
+  .health-tile.info .health-value  { color: var(--accent); }
+  .health-sub { font-size: 0.6rem; color: var(--text-dim); margin-top: 3px; }
+
+  /* ── MAIN GRID ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+
+  /* ── PANELS ── */
+  .panel {
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-full {
+    grid-column: 1 / -1;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 18px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.58rem; letter-spacing: 0.3em; color: var(--text-dim);
+  }
+
+  .panel-icon { font-size: 0.9rem; }
+
+  .panel-body { padding: 14px 18px; }
+
+  /* ── KV TABLE ── */
+  .kv-table { width: 100%; border-collapse: collapse; }
+  .kv-table tr { border-bottom: 1px solid var(--border); }
+  .kv-table tr:last-child { border-bottom: none; }
+  .kv-table td { padding: 7px 0; vertical-align: top; font-size: 0.8rem; }
+  .kv-table .k { color: var(--text-dim); font-size: 0.72rem; letter-spacing: 0.1em; padding-right: 16px; white-space: nowrap; width: 1px; }
+  .kv-table .v { color: var(--text-bright); word-break: break-all; }
+  .kv-table .v.ok    { color: var(--green); }
+  .kv-table .v.warn  { color: var(--amber); }
+  .kv-table .v.error { color: var(--red); }
+  .kv-table .v.accent { color: var(--accent); }
+  .kv-table .v.purple { color: var(--purple); }
+
+  /* ── BADGES ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; font-size: 0.6rem; letter-spacing: 0.12em; border: 1px solid;
+  }
+  .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; }
+  .badge-ok    { color: var(--green);  border-color: var(--green-dim);  background: rgba(0,212,106,0.07); }
+  .badge-ok::before { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .badge-error { color: var(--red);    border-color: var(--red-dim);    background: rgba(255,59,92,0.07); }
+  .badge-error::before { background: var(--red); box-shadow: 0 0 5px var(--red); }
+  .badge-warn  { color: var(--amber);  border-color: var(--amber-dim);  background: rgba(240,165,0,0.07); }
+  .badge-warn::before { background: var(--amber); }
+  .badge-info  { color: var(--accent); border-color: var(--accent-dim); background: rgba(0,170,255,0.07); }
+  .badge-info::before { background: var(--accent); }
+
+  /* ── KEY IDs LIST ── */
+  .key-id {
+    display: inline-block; padding: 3px 9px; margin: 2px;
+    border: 1px solid var(--border2);
+    color: var(--accent); font-size: 0.7rem; letter-spacing: 0.08em;
+    background: rgba(0,170,255,0.04);
+  }
+
+  /* ── SCOPE TABLE ── */
+  .scope-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .scope-row:last-child { border-bottom: none; }
+  .scope-name { color: var(--accent); font-size: 0.78rem; flex: 0 0 auto; min-width: 180px; }
+  .scope-desc { color: var(--text); font-size: 0.75rem; flex: 1; }
+  .risk-pill {
+    padding: 2px 8px; font-size: 0.58rem; letter-spacing: 0.15em; border: 1px solid; flex-shrink: 0;
+  }
+  .risk-low      { color: var(--green);  border-color: var(--green-dim); }
+  .risk-medium   { color: var(--amber);  border-color: var(--amber-dim); }
+  .risk-critical { color: var(--red);    border-color: var(--red-dim); animation: throb 1.6s ease-in-out infinite; }
+  @keyframes throb { 0%,100%{opacity:1}50%{opacity:0.5} }
+
+  /* ── AGENTS TABLE ── */
+  .agent-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 8px; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+    font-size: 0.78rem;
+  }
+  .agent-row:last-child { border-bottom: none; }
+  .agent-name { color: var(--text-bright); }
+  .agent-owner { color: var(--text-dim); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── AUTH EVENTS ── */
+  .event-row {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: 10px; align-items: center;
+    padding: 7px 0; border-bottom: 1px solid var(--border);
+    font-size: 0.75rem;
+  }
+  .event-row:last-child { border-bottom: none; }
+  .event-ts { color: var(--text-dim); font-size: 0.68rem; white-space: nowrap; }
+  .event-type { font-size: 0.65rem; letter-spacing: 0.1em; }
+  .event-detail { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── JWT DECODER ── */
+  .jwt-area {
+    display: flex; gap: 8px; margin-bottom: 12px;
+  }
+  .jwt-input {
+    flex: 1;
+    background: var(--bg3); border: 1px solid var(--border2);
+    color: var(--text-bright); font-family: var(--font-mono); font-size: 0.82rem;
+    padding: 7px 12px; outline: none;
+    transition: border-color 0.2s;
+  }
+  .jwt-input:focus { border-color: var(--purple); }
+  .jwt-input::placeholder { color: var(--text-dim); }
+  .decode-btn {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.15em;
+    padding: 7px 16px; border: 1px solid var(--purple); color: var(--purple);
+    background: transparent; cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .decode-btn:hover { background: var(--purple); color: var(--bg); box-shadow: 0 0 14px rgba(176,96,255,0.4); }
+
+  .jwt-sections { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .jwt-section { border: 1px solid var(--border); padding: 10px 12px; }
+  .jwt-section-label { font-size: 0.55rem; letter-spacing: 0.28em; color: var(--text-dim); margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .jwt-section pre { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-bright); white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+
+  .exp-bar-wrap { margin-top: 8px; }
+  .exp-bar-bg { height: 4px; background: var(--bg3); border: 1px solid var(--border); position: relative; }
+  .exp-bar-fill { height: 100%; transition: width 1s linear; }
+
+  /* ── EMPTY STATE ── */
+  .empty { text-align: center; padding: 30px 0; color: var(--text-dim); font-size: 0.75rem; }
+
+  /* ── ERROR BANNER ── */
+  .error-banner {
+    display: none; align-items: center; gap: 10px;
+    padding: 10px 28px; background: rgba(255,59,92,0.08);
+    border-bottom: 1px solid rgba(255,59,92,0.3);
+    font-size: 0.75rem; color: var(--red);
+  }
+  .error-banner.show { display: flex; }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="shield-icon">
+      <svg viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.5 3.4 10.7 8 12 4.6-1.3 8-6.5 8-12V6l-8-4z"/></svg>
+    </div>
+    <div class="wordmark">
+      SHIELDCLAW
+      <span>AUTH0 DEBUG PANEL</span>
+    </div>
+  </div>
+
+  <div class="nav-links">
+    <a class="nav-link" href="/shieldclaw/backboard">BACKBOARD</a>
+    <a class="nav-link active" href="/shieldclaw/auth0">AUTH0 DEBUG</a>
+    <a class="nav-link" href="/shieldclaw/debug">/debug JSON</a>
+    <a class="nav-link" href="/health">/health</a>
+  </div>
+
+  <div class="header-right">
+    <div class="live-dot" id="liveDot"></div>
+    <div class="live-text" id="liveText">LOADING…</div>
+    <button class="refresh-btn" onclick="load()">REFRESH</button>
+  </div>
+</header>
+
+<div class="error-banner" id="errBanner"><span>■</span><span id="errMsg"></span></div>
+
+<!-- HEALTH BAR -->
+<div class="health-bar" id="healthBar">
+  <div class="health-tile info">
+    <div class="health-label">SHIELDCLAW</div>
+    <div class="health-value">STARTING…</div>
+    <div class="health-sub">loading</div>
+  </div>
+  <div class="health-tile info">
+    <div class="health-label">AUTH0 JWKS</div>
+    <div class="health-value">—</div>
+    <div class="health-sub">—</div>
+  </div>
+  <div class="health-tile info">
+    <div class="health-label">OPENCLAW</div>
+    <div class="health-value">—</div>
+    <div class="health-sub">—</div>
+  </div>
+  <div class="health-tile info">
+    <div class="health-label">BACKBOARD API</div>
+    <div class="health-value">—</div>
+    <div class="health-sub">—</div>
+  </div>
+  <div class="health-tile info">
+    <div class="health-label">AGENTS ACTIVE</div>
+    <div class="health-value">—</div>
+    <div class="health-sub">registered</div>
+  </div>
+</div>
+
+<div class="main-grid">
+
+  <!-- AUTH0 CONFIG -->
+  <div class="panel">
+    <div class="panel-header"><span class="panel-icon">🔐</span> AUTH0 CONFIGURATION</div>
+    <div class="panel-body">
+      <table class="kv-table" id="auth0Config"><tr><td class="k">loading…</td><td class="v"></td></tr></table>
+    </div>
+  </div>
+
+  <!-- JWKS STATUS -->
+  <div class="panel">
+    <div class="panel-header"><span class="panel-icon">🔑</span> JWKS SIGNING KEYS</div>
+    <div class="panel-body" id="jwksPanel">
+      <table class="kv-table" id="jwksTable"></table>
+      <div style="margin-top:10px" id="keyIds"></div>
+    </div>
+  </div>
+
+  <!-- OPENCLAW + BACKBOARD STATUS -->
+  <div class="panel">
+    <div class="panel-header"><span class="panel-icon">🔗</span> UPSTREAM CONNECTIVITY</div>
+    <div class="panel-body">
+      <table class="kv-table" id="connectTable"></table>
+    </div>
+  </div>
+
+  <!-- SYSTEM INFO -->
+  <div class="panel">
+    <div class="panel-header"><span class="panel-icon">💻</span> SYSTEM</div>
+    <div class="panel-body">
+      <table class="kv-table" id="sysTable"></table>
+    </div>
+  </div>
+
+  <!-- SCOPE DEFINITIONS -->
+  <div class="panel">
+    <div class="panel-header"><span class="panel-icon">🛡</span> SCOPE → ROUTE MAP</div>
+    <div class="panel-body" id="scopePanel"></div>
+  </div>
+
+  <!-- AGENT REGISTRY -->
+  <div class="panel">
+    <div class="panel-header"><span class="panel-icon">🤖</span> AGENT REGISTRY</div>
+    <div class="panel-body" id="agentPanel"></div>
+  </div>
+
+  <!-- RECENT AUTH EVENTS -->
+  <div class="panel-full panel">
+    <div class="panel-header"><span class="panel-icon">📋</span> RECENT AUTH EVENTS (last 50)</div>
+    <div class="panel-body" id="authEvents"></div>
+  </div>
+
+  <!-- JWT DECODER -->
+  <div class="panel-full panel">
+    <div class="panel-header"><span class="panel-icon">🔬</span> JWT DECODER — paste any bearer token to inspect</div>
+    <div class="panel-body">
+      <div class="jwt-area">
+        <input type="password" class="jwt-input" id="jwtInput" placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9…" autocomplete="off" spellcheck="false">
+        <button class="decode-btn" onclick="decodeJwt()">DECODE</button>
+      </div>
+      <div id="jwtResult"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let data = null;
+
+async function load() {
+  document.getElementById('liveText').textContent = 'FETCHING…';
+  try {
+    const res = await fetch('/shieldclaw/auth0/status');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+    render(data);
+    document.getElementById('liveDot').classList.add('on');
+    document.getElementById('liveText').textContent = 'LIVE · ' + new Date().toLocaleTimeString('en-US', {hour12:false});
+    document.getElementById('errBanner').classList.remove('show');
+  } catch(e) {
+    document.getElementById('liveDot').classList.remove('on');
+    document.getElementById('liveText').textContent = 'ERROR';
+    document.getElementById('errMsg').textContent = e.message;
+    document.getElementById('errBanner').classList.add('show');
+  }
+}
+
+function render(d) {
+  renderHealthBar(d);
+  renderAuth0Config(d);
+  renderJwks(d);
+  renderConnect(d);
+  renderSystem(d);
+  renderScopes(d);
+  renderAgents(d);
+  renderAuthEvents(d);
+}
+
+function renderHealthBar(d) {
+  const bar = document.getElementById('healthBar');
+  const tiles = bar.querySelectorAll('.health-tile');
+
+  // ShieldClaw uptime
+  const upSec = d.system.uptime_seconds;
+  const upStr = upSec < 60 ? upSec + 's' : upSec < 3600 ? Math.floor(upSec/60) + 'm' : Math.floor(upSec/3600) + 'h ' + Math.floor((upSec%3600)/60) + 'm';
+  setTile(tiles[0], 'ok', 'RUNNING', upStr + ' uptime');
+
+  // JWKS
+  const j = d.jwks;
+  if (j.healthy) setTile(tiles[1], 'ok', j.key_count + ' KEY' + (j.key_count!==1?'S':''), 'age ' + j.age_seconds + 's');
+  else setTile(tiles[1], 'error', 'NOT CACHED', 'needs fetch');
+
+  // OpenClaw
+  const oc = d.openclaw;
+  if (oc.reachable) setTile(tiles[2], 'ok', 'REACHABLE', oc.latency_ms + ' ms');
+  else setTile(tiles[2], 'error', 'UNREACHABLE', oc.error ? oc.error.slice(0,30) : '—');
+
+  // Backboard
+  const bb = d.backboard;
+  if (bb.reachable) setTile(tiles[3], 'ok', 'CONNECTED', bb.latency_ms + ' ms');
+  else setTile(tiles[3], bb.api_key_set ? 'warn' : 'error', bb.api_key_set ? 'KEY SET' : 'NO KEY', bb.error ? bb.error.slice(0,30) : '—');
+
+  // Agents
+  const ar = d.agent_registry;
+  setTile(tiles[4], ar.active > 0 ? 'ok' : 'info', ar.active + ' ACTIVE', ar.revoked + ' revoked');
+}
+
+function setTile(tile, state, value, sub) {
+  tile.className = 'health-tile ' + state;
+  tile.querySelector('.health-value').textContent = value;
+  tile.querySelector('.health-sub').textContent = sub;
+}
+
+function renderAuth0Config(d) {
+  const a = d.auth0;
+  const rows = [
+    ['DOMAIN',        a.domain,                              'accent'],
+    ['AUDIENCE',      a.audience,                            'accent'],
+    ['ISSUER',        a.issuer,                              'accent'],
+    ['ALGORITHMS',    a.algorithms.join(', '),               'ok'],
+    ['JWKS URL',      a.jwks_url,                            'text-bright'],
+    ['CLIENT ID',     a.client_id_configured ? 'SET ✓' : 'NOT SET', a.client_id_configured ? 'ok' : 'error'],
+  ];
+  kvTable('auth0Config', rows);
+}
+
+function renderJwks(d) {
+  const j = d.jwks;
+  const rows = [
+    ['STATUS',       j.healthy ? 'CACHED ✓' : 'NOT CACHED',        j.healthy ? 'ok' : 'error'],
+    ['KEY COUNT',    j.key_count.toString(),                          'accent'],
+    ['CACHE AGE',    j.age_seconds !== null ? j.age_seconds + 's' : 'N/A', j.age_seconds !== null && j.age_seconds < 3000 ? 'ok' : 'warn'],
+    ['CACHE TTL',    j.ttl_seconds + 's (1 hour)',                   'text-bright'],
+  ];
+  kvTable('jwksTable', rows);
+
+  const kidEl = document.getElementById('keyIds');
+  kidEl.innerHTML = '';
+  if (j.key_ids.length) {
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:0.6rem;letter-spacing:0.2em;color:var(--text-dim);margin-bottom:6px';
+    label.textContent = 'ACTIVE KEY IDs';
+    kidEl.appendChild(label);
+    j.key_ids.forEach(kid => {
+      const span = document.createElement('span');
+      span.className = 'key-id';
+      span.textContent = kid;
+      kidEl.appendChild(span);
+    });
+  }
+}
+
+function renderConnect(d) {
+  const oc = d.openclaw;
+  const bb = d.backboard;
+  const rows = [
+    ['OPENCLAW URL',       oc.url,                                  'accent'],
+    ['OPENCLAW STATUS',    oc.reachable ? 'REACHABLE ✓' : 'UNREACHABLE ✗', oc.reachable ? 'ok' : 'error'],
+    ['OPENCLAW LATENCY',   oc.latency_ms !== null ? oc.latency_ms + ' ms' : 'N/A', oc.latency_ms !== null && oc.latency_ms < 100 ? 'ok' : 'warn'],
+    ['OPENCLAW ERROR',     oc.error || '—',                         oc.error ? 'error' : 'text-bright'],
+    ['─────────────', '─────────────────────────────', 'text-dim'],
+    ['BACKBOARD URL',      bb.url,                                  'purple'],
+    ['BACKBOARD KEY',      bb.api_key_set ? 'SET ✓' : 'NOT SET ✗', bb.api_key_set ? 'ok' : 'error'],
+    ['BACKBOARD STATUS',   bb.reachable ? 'CONNECTED ✓' : 'UNREACHABLE ✗', bb.reachable ? 'ok' : 'error'],
+    ['BACKBOARD LATENCY',  bb.latency_ms !== null ? bb.latency_ms + ' ms' : 'N/A', bb.latency_ms !== null && bb.latency_ms < 500 ? 'ok' : 'warn'],
+    ['BACKBOARD ERROR',    bb.error || '—',                         bb.error ? 'error' : 'text-bright'],
+    ['EVAL MODE',          bb.current_eval_mode.toUpperCase(),       'purple'],
+    ['THINK MODEL',        bb.think_model,                          'text-bright'],
+    ['FAST MODEL',         bb.fast_model,                           'text-bright'],
+  ];
+  kvTable('connectTable', rows);
+}
+
+function renderSystem(d) {
+  const s = d.system;
+  const upSec = s.uptime_seconds;
+  const upStr = upSec < 60 ? upSec + 's' : upSec < 3600 ? Math.floor(upSec/60) + 'm ' + (upSec%60) + 's' : Math.floor(upSec/3600) + 'h ' + Math.floor((upSec%3600)/60) + 'm';
+  const rows = [
+    ['PORT',        s.shieldclaw_port.toString(),  'accent'],
+    ['UPTIME',      upStr,                          'ok'],
+    ['STARTED AT',  new Date(s.uptime_since * 1000).toLocaleString(), 'text-bright'],
+    ['PYTHON',      s.python,                       'text-bright'],
+    ['PLATFORM',    s.platform,                     'text-bright'],
+  ];
+  kvTable('sysTable', rows);
+}
+
+function renderScopes(d) {
+  const panel = document.getElementById('scopePanel');
+  panel.innerHTML = '';
+  const defs = d.scope_definitions;
+  for (const [scope, info] of Object.entries(defs)) {
+    const row = document.createElement('div');
+    row.className = 'scope-row';
+    row.innerHTML = `
+      <span class="scope-name">${esc(scope)}</span>
+      <span class="scope-desc">${esc(info.description)}</span>
+      <span class="risk-pill risk-${info.risk}">${info.risk.toUpperCase()}</span>
+    `;
+    panel.appendChild(row);
+  }
+
+  // Route→scope map
+  const divider = document.createElement('div');
+  divider.style.cssText = 'margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:0.58rem;letter-spacing:0.25em;color:var(--text-dim);margin-bottom:6px';
+  divider.textContent = 'ROUTE → REQUIRED SCOPE';
+  panel.appendChild(divider);
+
+  for (const [route, scopes] of Object.entries(d.route_scopes)) {
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:4px 0;font-size:0.75rem;display:flex;gap:12px;border-bottom:1px solid var(--border)';
+    row.innerHTML = `<span style="color:var(--accent);min-width:200px">${esc(route)}</span><span style="color:var(--text)">${esc(scopes.join(', '))}</span>`;
+    panel.appendChild(row);
+  }
+}
+
+function renderAgents(d) {
+  const panel = document.getElementById('agentPanel');
+  const agents = d.agent_registry.agents;
+  if (!agents.length) { panel.innerHTML = '<div class="empty">No agents registered</div>'; return; }
+  panel.innerHTML = `<div style="font-size:0.6rem;letter-spacing:0.2em;color:var(--text-dim);margin-bottom:8px">TOTAL: ${d.agent_registry.total} | ACTIVE: ${d.agent_registry.active} | REVOKED: ${d.agent_registry.revoked}</div>`;
+  agents.forEach(a => {
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:8px 0;border-bottom:1px solid var(--border);font-size:0.77rem';
+    const revokedBadge = a.revoked ? `<span class="badge badge-error" style="margin-left:6px">REVOKED</span>` : `<span class="badge badge-ok" style="margin-left:6px">ACTIVE</span>`;
+    row.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span style="color:var(--text-bright);font-weight:bold">${esc(a.agent_name)}</span>
+        ${revokedBadge}
+      </div>
+      <div style="color:var(--text-dim);font-size:0.68rem;margin-bottom:3px">ID: <span style="color:var(--accent)">${esc(a.agent_id)}</span></div>
+      <div style="color:var(--text-dim);font-size:0.68rem;margin-bottom:3px">OWNER: <span style="color:var(--text)">${esc(a.owner_sub)}</span></div>
+      <div style="color:var(--text-dim);font-size:0.68rem">SCOPES: <span style="color:var(--purple)">${esc(a.scopes.join(', '))}</span></div>
+    `;
+    panel.appendChild(row);
+  });
+}
+
+function renderAuthEvents(d) {
+  const panel = document.getElementById('authEvents');
+  const events = d.recent_auth_events;
+  if (!events.length) { panel.innerHTML = '<div class="empty">No auth events recorded yet — events appear when tokens are verified</div>'; return; }
+  panel.innerHTML = '';
+  events.forEach(ev => {
+    const row = document.createElement('div');
+    row.className = 'event-row';
+    const isOk = ev.event === 'auth_ok';
+    const badgeClass = isOk ? 'badge-ok' : 'badge-error';
+    const ts = new Date(ev.ts * 1000).toLocaleTimeString('en-US', {hour12:false});
+    let detail = '';
+    if (isOk) detail = `sub=${ev.sub || '?'} kid=${ev.kid || '?'}`;
+    else detail = `reason=${ev.reason || '?'} ${ev.kid ? 'kid=' + ev.kid : ''}`;
+    row.innerHTML = `
+      <span class="event-ts">${ts}</span>
+      <span class="badge ${badgeClass} event-type">${esc(ev.event.replace('_', ' ').toUpperCase())}</span>
+      <span class="event-detail" title="${esc(detail)}">${esc(detail)}</span>
+    `;
+    panel.appendChild(row);
+  });
+}
+
+// ── JWT DECODER ──────────────────────────────────────────────────
+function decodeJwt() {
+  const token = document.getElementById('jwtInput').value.trim();
+  const result = document.getElementById('jwtResult');
+  if (!token) { result.innerHTML = '<div class="empty">Paste a JWT token above</div>'; return; }
+
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) throw new Error('Not a valid JWT (expected 3 parts)');
+
+    function b64decode(s) {
+      s = s.replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      return JSON.parse(atob(s));
+    }
+
+    const header  = b64decode(parts[0]);
+    const payload = b64decode(parts[1]);
+
+    // Build expiry info
+    let expInfo = '';
+    let expColor = 'var(--green)';
+    let expPct = 100;
+    if (payload.exp) {
+      const now = Date.now() / 1000;
+      const remaining = payload.exp - now;
+      const total = payload.exp - (payload.iat || payload.exp - 3600);
+      expPct = Math.max(0, Math.min(100, (remaining / total) * 100));
+      if (remaining <= 0) {
+        expInfo = '⚠ EXPIRED ' + Math.abs(Math.round(remaining/60)) + 'm ago';
+        expColor = 'var(--red)';
+        expPct = 0;
+      } else {
+        expInfo = '✓ expires in ' + (remaining > 3600 ? Math.floor(remaining/3600) + 'h ' + Math.floor((remaining%3600)/60) + 'm' : Math.floor(remaining/60) + 'm ' + Math.floor(remaining%60) + 's');
+      }
+    }
+
+    const isAgent = (payload.sub || '').endsWith('@clients') || payload.gty === 'client-credentials';
+
+    result.innerHTML = `
+      <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="badge ${isAgent ? 'badge-warn' : 'badge-info'}">${isAgent ? 'AGENT / M2M' : 'HUMAN / USER'}</span>
+        ${payload.exp ? `<span style="font-size:0.72rem;color:${expColor}">${esc(expInfo)}</span>` : ''}
+        ${payload.exp ? `<div style="flex:1;min-width:100px"><div class="exp-bar-bg"><div class="exp-bar-fill" style="width:${expPct}%;background:${expColor}"></div></div></div>` : ''}
+      </div>
+      <div class="jwt-sections">
+        <div class="jwt-section">
+          <div class="jwt-section-label">HEADER</div>
+          <pre>${esc(JSON.stringify(header, null, 2))}</pre>
+        </div>
+        <div class="jwt-section">
+          <div class="jwt-section-label">PAYLOAD (decoded, NOT verified)</div>
+          <pre>${esc(JSON.stringify(payload, null, 2))}</pre>
+        </div>
+        <div class="jwt-section">
+          <div class="jwt-section-label">QUICK SUMMARY</div>
+          <pre>${esc(buildSummary(header, payload, isAgent))}</pre>
+        </div>
+      </div>
+    `;
+  } catch(e) {
+    result.innerHTML = `<div style="color:var(--red);font-size:0.8rem">Decode error: ${esc(e.message)}</div>`;
+  }
+}
+
+function buildSummary(h, p, isAgent) {
+  const lines = [];
+  lines.push('alg      : ' + (h.alg || '?'));
+  lines.push('kid      : ' + (h.kid || '?'));
+  lines.push('sub      : ' + (p.sub || '?'));
+  lines.push('iss      : ' + (p.iss || '?'));
+  lines.push('aud      : ' + (Array.isArray(p.aud) ? p.aud.join(', ') : (p.aud || '?')));
+  lines.push('scope    : ' + (p.scope || p.scp || '(none)'));
+  if (p.iat) lines.push('iat      : ' + new Date(p.iat*1000).toISOString());
+  if (p.exp) lines.push('exp      : ' + new Date(p.exp*1000).toISOString());
+  if (p.azp) lines.push('azp      : ' + p.azp);
+  if (p.gty) lines.push('gty      : ' + p.gty);
+  lines.push('type     : ' + (isAgent ? 'AGENT (M2M)' : 'HUMAN'));
+  return lines.join('\n');
+}
+
+function kvTable(id, rows) {
+  const t = document.getElementById(id);
+  if (!t) return;
+  t.innerHTML = rows.map(([k,v,cls]) =>
+    `<tr><td class="k">${esc(k)}</td><td class="v ${cls||''}">${esc(v)}</td></tr>`
+  ).join('');
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// allow Enter in JWT input
+document.getElementById('jwtInput').addEventListener('keydown', e => { if (e.key === 'Enter') decodeJwt(); });
+
+// auto-refresh every 15s
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
