@@ -1,6 +1,6 @@
 fastapi
-uvicorn 
-authlib 
-httpx 
+uvicorn
+authlib
+httpx
 python-dotenv
-
+python-jose[cryptography]
