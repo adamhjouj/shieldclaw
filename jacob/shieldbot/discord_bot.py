@@ -211,18 +211,31 @@ _SYSTEM_MESSAGE = {
 }
 
 
-async def _chat(channel_id: int, user_message: str) -> str:
+async def _chat(
+    channel_id: int,
+    user_message: str,
+    *,
+    discord_user_id: int = 0,
+    guild_id: int = 0,
+) -> str:
     """Send a message to OpenClaw via ShieldClaw and return the reply."""
     history = _channel_history.setdefault(channel_id, [])
     history.append({"role": "user", "content": user_message})
 
+    ltm_headers: dict[str, str] = {
+        "Authorization": f"Bearer {SHIELDCLAW_TOKEN}",
+        "Content-Type": "application/json",
+        "X-Discord-Channel-Id": str(channel_id),
+    }
+    if discord_user_id:
+        ltm_headers["X-Discord-User-Id"] = str(discord_user_id)
+    if guild_id:
+        ltm_headers["X-Discord-Guild-Id"] = str(guild_id)
+
     async with httpx.AsyncClient(timeout=90.0) as client:
         resp = await client.post(
             f"{SHIELDCLAW_URL}/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {SHIELDCLAW_TOKEN}",
-                "Content-Type": "application/json",
-            },
+            headers=ltm_headers,
             json={"messages": [_SYSTEM_MESSAGE] + history},
         )
     resp.raise_for_status()
@@ -350,7 +363,12 @@ async def on_message(message: discord.Message):
 
     async def _process():
         try:
-            reply = await _chat(message.channel.id, content)
+            reply = await _chat(
+                message.channel.id,
+                content,
+                discord_user_id=message.author.id,
+                guild_id=message.guild.id if message.guild else 0,
+            )
 
             if not reply:
                 await status_msg.edit(content="Hmm, didn't get a response. Try again?")
