@@ -245,6 +245,11 @@ def read_message(access_token: str, message_id: str) -> dict:
     }
 
 
+def delete_message(access_token: str, message_id: str) -> dict:
+    """Move a message to Trash (recoverable for 30 days)."""
+    return gmail_request(access_token, f"messages/{message_id}/trash", method="POST")
+
+
 def output(data, pretty: bool = False) -> None:
     if pretty:
         if isinstance(data, list):
@@ -295,6 +300,10 @@ def main() -> int:
     sp_search.add_argument("--query", required=True, help="Gmail search query (same syntax as Gmail search bar).")
     sp_search.add_argument("--max-results", type=int, default=10, help="Max messages to return.")
 
+    # delete
+    sp_delete = sub.add_parser("delete", help="Delete (trash) an email.")
+    sp_delete.add_argument("--message-id", required=True, help="Gmail message ID to delete.")
+
     args = ap.parse_args()
 
     creds = load_credentials()
@@ -318,6 +327,13 @@ def main() -> int:
     elif args.command == "search":
         messages = list_messages(access_token, query=args.query, max_results=args.max_results)
         output(messages, args.pretty)
+
+    elif args.command == "delete":
+        result = delete_message(access_token, args.message_id)
+        if args.pretty:
+            print(f"Email moved to Trash. Message ID: {args.message_id}")
+        else:
+            output(result)
 
     return 0
 
