@@ -1,18 +1,17 @@
-"""Central evaluation pipeline — Claude-powered.
+"""Central evaluation pipeline — powered by Backboard.io LLM routing.
 
-Any action type is accepted. Claude Haiku classifies it and returns a structured
+Any action type is accepted. The LLM classifies it and returns a structured
 safety decision. No hardcoded rules, no fixed action types.
+LLM calls go through Backboard.io (GPT-4o by default), so threads and memory
+are automatically integrated.
 """
 
 from __future__ import annotations
 
 import json
-import os
-
-import anthropic
 
 from .types import ActionRequest, Decision
-from . import thread_manager, memory, logger
+from . import thread_manager, memory, logger, backboard_client
 from .trace import DecisionTrace, build_decision_trace
 from .capture import (
     OpenClawInput,
@@ -22,8 +21,6 @@ from .capture import (
     capture_openclaw_output,
 )
 from . import backboard
-
-_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 _BASE_SYSTEM_PROMPT = """You are a security policy engine for an AI agent system.
 
@@ -70,29 +67,35 @@ def _build_system_prompt(trust_tier: str) -> str:
 
 
 def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
-    # 1. Thread context
     thread = thread_manager.get_or_create_thread(request.session_id, request.user_id)
     thread_id = thread["thread_id"]
 
-    # 2. Auto-degrade trust tier if agent has been blocked repeatedly this session
     effective_tier = _effective_trust_tier(trust_tier, thread)
 
-    # 3. User memory & preferences
     user_mem = memory.get_user_memory(request.user_id)
     merged_prefs = {**user_mem["preferences"], **request.user_preferences}
 
-    # 4. Build the prompt for Claude
     user_message = _build_prompt(request, merged_prefs, user_mem)
+    system_prompt = _build_system_prompt(effective_tier)
 
-    # 5. Call Claude Haiku — cheapest model, fast, good enough for classification
+    full_prompt = (
+        f"{system_prompt}\n\n---\n\n{user_message}\n\n"
+        "Respond with ONLY a JSON object, no markdown fences."
+    )
+
     try:
-        response = _client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=256,
-            system=_build_system_prompt(effective_tier),
-            messages=[{"role": "user", "content": user_message}],
+        # Use a dedicated eval thread on Backboard — LLM call + memory in one shot
+        eval_thread = backboard_client.create_thread()
+        eval_thread_id = eval_thread["thread_id"]
+        resp = backboard_client.add_message(
+            eval_thread_id,
+            full_prompt,
+            memory="Auto",
+            send_to_llm="true",
         )
-        raw = response.content[0].text.strip()
+        raw = (resp.get("content") or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         parsed = json.loads(raw)
         decision = Decision(
             status=parsed["status"],
@@ -102,7 +105,6 @@ def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
             thread_id=thread_id,
         )
     except Exception as e:
-        # If Claude call fails, fail safe — block and surface the error
         decision = Decision(
             status="blocked",
             reason=f"Safety evaluation failed: {e}",
@@ -111,10 +113,8 @@ def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
             thread_id=thread_id,
         )
 
-    # 6. Audit log
     logger.log_decision(request, decision, effective_tier)
 
-    # 6. Update thread and user memory
     thread_manager.append_to_thread(request.session_id, {
         "action_type": request.action_type,
         "status": decision.status,
@@ -134,7 +134,6 @@ _TIER_ORDER = ["high", "medium", "low"]
 
 
 def _effective_trust_tier(base_tier: str, thread: dict) -> str:
-    """Degrade trust tier by one level if the agent has 3+ blocks in this session."""
     recent_blocks = sum(
         1 for h in thread.get("history", []) if h.get("status") == "blocked"
     )
@@ -159,10 +158,9 @@ def _build_prompt(
     if request.prior_behavior_summary:
         parts.append(f"Prior behavior context: {request.prior_behavior_summary}")
 
-    # Include recent thread history so Claude has session context
     thread = thread_manager.get_thread(request.session_id)
     if thread and thread["history"]:
-        recent = thread["history"][-5:]  # last 5 actions in this session
+        recent = thread["history"][-5:]
         parts.append(f"Recent session actions: {json.dumps(recent, indent=2)}")
 
     return "\n\n".join(parts)
@@ -183,16 +181,6 @@ def evaluate_shieldbot_request(
     user_preferences: dict | None = None,
     trust_tier: str = "medium",
 ) -> tuple[Decision, DecisionTrace, InteractionRecord]:
-    """Full Shieldbot evaluation with OpenClaw capture and decision trace.
-
-    This is the top-level entry point that:
-    1. Captures the OpenClaw input (user request + parsed action)
-    2. Captures the OpenClaw output (proposed action)
-    3. Evaluates via Claude
-    4. Builds a structured decision trace
-    5. Records the full interaction in the Backboard thread
-    6. Returns (decision, trace, interaction_record)
-    """
     oc_input = capture_openclaw_input(
         user_request=user_request,
         action_type=action_type,
@@ -213,7 +201,6 @@ def evaluate_shieldbot_request(
     )
     decision = evaluate(req, trust_tier=trust_tier)
 
-    # Derive matched rules/preferences from Claude's factors
     matched_rules = [f for f in decision.factors if not f.startswith("user_")]
     matched_prefs = [f for f in decision.factors if f.startswith("user_")]
 
@@ -244,7 +231,6 @@ def evaluate_shieldbot_request(
         thread_id=decision.thread_id or "",
     )
 
-    # Store everything in Backboard
     backboard.log_decision_trace(decision.thread_id or "", session_id, trace)
     backboard.record_interaction(session_id, record)
 
@@ -257,7 +243,6 @@ def record_openclaw_interaction(
     decision: Decision,
     session_id: str,
 ) -> InteractionRecord:
-    """Record an already-evaluated interaction into the Backboard thread."""
     record = InteractionRecord(
         openclaw_input=oc_input,
         openclaw_output=oc_output,
