@@ -1,8 +1,19 @@
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const { scanPrompt } = require('../auth/prompt-scanner');
 const { requestCibaApproval } = require('../auth/ciba-handler');
 const { executeAction, abortAction } = require('../auth/action-executor');
+
+function verifySecret(incoming, expected) {
+  if (!expected) return true; // no secret configured — open
+  if (!incoming) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(incoming), Buffer.from(expected));
+  } catch {
+    return false; // buffers are different lengths → reject
+  }
+}
 
 const BACKBOARD_BASE_URL = process.env.BACKBOARD_BASE_URL || 'https://app.backboard.io/api';
 
@@ -40,8 +51,7 @@ function buildBindingMessage(category, content) {
 //
 // Body: { thread_id, content, user_id?, memory? }
 router.post('/prompt', async (req, res) => {
-  const secret = process.env.BACKBOARDS_WEBHOOK_SECRET;
-  if (secret && req.headers['x-backboards-secret'] !== secret) {
+  if (!verifySecret(req.headers['x-backboards-secret'], process.env.BACKBOARDS_WEBHOOK_SECRET)) {
     return res.status(401).json({ error: 'Invalid webhook secret' });
   }
 

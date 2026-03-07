@@ -1,26 +1,38 @@
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
-const { requestCibaApproval } = require('../auth/ciba-handler');
+const { initiateCIBA } = require('../auth/ciba-handler');
 const { executeAction, abortAction } = require('../auth/action-executor');
 
-const MONITORED_EVENTS = ['file.delete', 'payment.initiate', 'transaction.create'];
-
-function buildBindingMessage(event) {
-  switch (event.event_type) {
-    case 'file.delete':
-      return `ClawdBot wants to delete ${event.filename || 'a file'} — approve?`;
-    case 'payment.initiate':
-      return `ClawdBot wants to initiate payment of ${event.amount || '(unknown amount)'} — approve?`;
-    case 'transaction.create':
-      return `ClawdBot wants to create transaction ${event.transaction_id || '(unknown)'} — approve?`;
-    default:
-      return `ClawdBot wants to perform ${event.event_type} — approve?`;
+function verifySecret(incoming, expected) {
+  if (!expected) return true;
+  if (!incoming) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(incoming), Buffer.from(expected));
+  } catch {
+    return false;
   }
 }
 
+const MONITORED_EVENTS = ['file.delete', 'payment.initiate', 'transaction.create', 'file.operation'];
+
+// POST /backboards/webhook
+//
+// Backup endpoint for when Backboards.io pushes events directly.
+// Uses the same CIBA email flow as the ClawdBot interceptor.
+//
+// Expected payload from Backboards.io:
+// {
+//   event_type:       string   — one of MONITORED_EVENTS
+//   user_id?:         string   — Auth0 sub of the affected user
+//   filename?:        string   — for file.delete / file.operation events
+//   amount?:          string   — for payment.initiate events
+//   recipient?:       string   — for payment.initiate events
+//   transaction_id?:  string   — for transaction.create events
+//   details?:         string   — human-readable detail (any event)
+// }
 router.post('/webhook', async (req, res) => {
-  const secret = process.env.BACKBOARDS_WEBHOOK_SECRET;
-  if (secret && req.headers['x-backboards-secret'] !== secret) {
+  if (!verifySecret(req.headers['x-backboards-secret'], process.env.BACKBOARDS_WEBHOOK_SECRET)) {
     return res.status(401).json({ error: 'Invalid webhook secret' });
   }
 
@@ -35,27 +47,29 @@ router.post('/webhook', async (req, res) => {
     return res.status(400).json({ error: 'No user_id in payload and AUTH0_TEST_USER_ID not set' });
   }
 
-  const bindingMessage = buildBindingMessage(event);
+  console.log(`[backboards-webhook] Received ${event.event_type} for user ${userId}`);
+  console.log(`[backboards-webhook] Initiating CIBA email approval`);
 
-  console.log(`[backboards-webhook] Intercepted ${event.event_type} for user ${userId}`);
-  console.log(`[backboards-webhook] Sending Guardian push: "${bindingMessage}"`);
-
-  let result;
+  let cibaResult;
   try {
-    result = await requestCibaApproval(userId, bindingMessage);
+    cibaResult = await initiateCIBA({
+      event_type: event.event_type,
+      payload: event,
+      user_id: userId,
+    });
   } catch (err) {
-    console.error('[backboards-webhook] CIBA request failed:', err.message);
-    abortAction(event, 'ciba_error');
+    console.error('[backboards-webhook] CIBA failed:', err.message);
+    abortAction(event.event_type, event, 'ciba_error');
     return res.status(500).json({ error: 'CIBA request failed', detail: err.message });
   }
 
-  if (result === 'approved') {
-    executeAction(event);
+  if (cibaResult === 'approved') {
+    executeAction(event.event_type, event);
   } else {
-    abortAction(event, result);
+    abortAction(event.event_type, event, cibaResult);
   }
 
-  return res.status(200).json({ status: result });
+  return res.status(200).json({ status: cibaResult });
 });
 
 module.exports = router;

@@ -6,7 +6,7 @@ const app = express();
 app.use(express.json());
 
 app.use('/backboards', require('./routes/backboards-webhook'));
-app.use('/backboards', require('./routes/prompt-gateway'));
+app.use('/clawdbot',   require('./routes/clawdbot-interceptor'));
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
