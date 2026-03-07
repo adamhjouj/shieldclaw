@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShieldClaw // Backboard Monitor</title>
+<style>
+  .nav-links { display: flex; gap: 12px; }
+  .nav-link {
+    font-size: 0.7rem; letter-spacing: 0.18em;
+    padding: 6px 14px;
+    border: 1px solid var(--border2);
+    color: var(--text-dim);
+    text-decoration: none;
+    transition: all 0.15s;
+    font-family: var(--font-mono);
+  }
+  .nav-link:hover { border-color: var(--accent); color: var(--accent); }
+  .nav-link.active { border-color: var(--accent); color: var(--accent); }
+  .sys-strip {
+    display: flex; gap: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    font-size: 0.68rem; letter-spacing: 0.12em;
+    overflow-x: auto;
+  }
+  .sys-chip {
+    padding: 7px 16px; border-right: 1px solid var(--border);
+    white-space: nowrap; display: flex; align-items: center; gap: 6px;
+  }
+  .sys-chip:last-child { border-right: none; }
+  .sys-chip-label { color: var(--text-dim); }
+  .sys-chip-val   { color: var(--text-bright); }
+  .sys-chip-val.ok     { color: var(--green); }
+  .sys-chip-val.warn   { color: var(--amber); }
+  .sys-chip-val.error  { color: var(--red); }
+  .sys-chip-val.accent { color: var(--accent); }
+  .sys-chip-val.purple { color: #b060ff; }
+</style>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  :root {
+    --bg:        #080a0c;
+    --bg2:       #0d1117;
+    --bg3:       #111820;
+    --border:    #1e2d3d;
+    --border2:   #243447;
+    --text:      #8faacc;
+    --text-dim:  #3d5470;
+    --text-bright: #c8dff5;
+    --amber:     #f0a500;
+    --amber-dim: #7a5300;
+    --green:     #00d46a;
+    --green-dim: #004d27;
+    --red:       #ff3b5c;
+    --red-dim:   #5c0018;
+    --yellow:    #f0c000;
+    --yellow-dim:#5c4800;
+    --accent:    #0af;
+    --accent-dim:#003344;
+    --font-mono: 'Share Tech Mono', 'Courier New', monospace;
+    --font-hud:  'Orbitron', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { font-size: 13px; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+    overflow-x: hidden;
+    cursor: crosshair;
+  }
+
+  /* scanline overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* noise texture */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9998;
+    opacity: 0.4;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0a1520 0%, var(--bg) 100%);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .shield-icon {
+    width: 36px; height: 36px;
+    border: 2px solid var(--accent);
+    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-dim);
+    box-shadow: 0 0 16px rgba(0,170,255,0.3);
+    flex-shrink: 0;
+  }
+
+  .shield-icon svg { width: 18px; height: 18px; fill: var(--accent); }
+
+  .wordmark {
+    font-family: var(--font-hud);
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--text-bright);
+    line-height: 1;
+  }
+
+  .wordmark span {
+    color: var(--accent);
+    font-size: 0.7rem;
+    display: block;
+    letter-spacing: 0.3em;
+    font-weight: 400;
+    margin-top: 2px;
+  }
+
+  /* threat meter — center of header */
+  .threat-meter {
+    text-align: center;
+    font-family: var(--font-hud);
+  }
+
+  .threat-label {
+    font-size: 0.55rem;
+    letter-spacing: 0.35em;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+
+  .threat-value {
+    font-size: 2.4rem;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    line-height: 1;
+    transition: color 0.6s, text-shadow 0.6s;
+  }
+
+  .threat-value.calm   { color: var(--green); text-shadow: 0 0 24px rgba(0,212,106,0.6); }
+  .threat-value.warn   { color: var(--amber); text-shadow: 0 0 24px rgba(240,165,0,0.6); animation: throb 1.4s ease-in-out infinite; }
+  .threat-value.alert  { color: var(--red);   text-shadow: 0 0 24px rgba(255,59,92,0.6);  animation: strobe 0.7s ease-in-out infinite; }
+
+  @keyframes throb  { 0%,100% { opacity:1 } 50% { opacity:0.6 } }
+  @keyframes strobe { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
+
+  .threat-sub {
+    font-size: 0.5rem;
+    letter-spacing: 0.3em;
+    color: var(--text-dim);
+    margin-top: 3px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  /* status dot */
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+
+  .status-dot.live {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot { 0%,100% { box-shadow: 0 0 4px var(--green) } 50% { box-shadow: 0 0 14px var(--green) } }
+
+  .status-text {
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    color: var(--text-dim);
+  }
+
+  /* ── AUTH BAR ── */
+  .auth-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 28px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .auth-label {
+    font-size: 0.65rem;
+    letter-spacing: 0.25em;
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .auth-input {
+    flex: 1;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    color: var(--text-bright);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    padding: 7px 12px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    letter-spacing: 0.05em;
+  }
+
+  .auth-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0,170,255,0.15);
+  }
+
+  .auth-input::placeholder { color: var(--text-dim); }
+
+  .btn {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    padding: 7px 16px;
+    border: 1px solid;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .btn-primary:hover {
+    background: var(--accent);
+    color: var(--bg);
+    box-shadow: 0 0 16px rgba(0,170,255,0.4);
+  }
+
+  .btn-dim {
+    border-color: var(--border2);
+    color: var(--text-dim);
+  }
+
+  .btn-dim:hover {
+    border-color: var(--text);
+    color: var(--text-bright);
+  }
+
+  .btn-dim.active {
+    border-color: var(--green);
+    color: var(--green);
+    box-shadow: 0 0 10px rgba(0,212,106,0.2);
+  }
+
+  /* ── STATS BAR ── */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .stat {
+    padding: 16px 24px;
+    border-right: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat:last-child { border-right: none; }
+
+  .stat::before {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--border2);
+    transition: background 0.5s;
+  }
+
+  .stat.total::before   { background: var(--accent); }
+  .stat.approved::before { background: var(--green); }
+  .stat.blocked::before  { background: var(--red); }
+  .stat.risk::before     { background: var(--amber); }
+
+  .stat-label {
+    font-size: 0.58rem;
+    letter-spacing: 0.3em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-family: var(--font-hud);
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+    transition: color 0.4s;
+  }
+
+  .stat.total   .stat-value { color: var(--accent); }
+  .stat.approved .stat-value { color: var(--green); }
+  .stat.blocked  .stat-value { color: var(--red); }
+  .stat.risk     .stat-value { color: var(--amber); }
+
+  .stat-sub {
+    font-size: 0.6rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ── TABLE WRAPPER ── */
+  .table-wrap {
+    padding: 0 0 40px;
+  }
+
+  /* ── LOG TABLE ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead {
+    position: sticky;
+    top: 68px; /* header height */
+    z-index: 50;
+  }
+
+  th {
+    background: var(--bg2);
+    border-bottom: 2px solid var(--border2);
+    border-right: 1px solid var(--border);
+    padding: 10px 14px;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.25em;
+    color: var(--text-dim);
+    font-weight: normal;
+    white-space: nowrap;
+  }
+
+  th:last-child { border-right: none; }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    cursor: pointer;
+  }
+
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+
+  tbody tr.detail-row {
+    background: var(--bg2);
+    cursor: default;
+  }
+
+  tbody tr.detail-row:hover { background: var(--bg2); }
+
+  td {
+    padding: 10px 14px;
+    border-right: 1px solid var(--border);
+    vertical-align: middle;
+    font-size: 0.82rem;
+  }
+
+  td:last-child { border-right: none; }
+
+  /* status badge */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    font-size: 0.6rem;
+    letter-spacing: 0.18em;
+    font-weight: normal;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+
+  .badge::before {
+    content: '';
+    width: 5px; height: 5px;
+    border-radius: 50%;
+  }
+
+  .badge-approved {
+    color: var(--green);
+    border-color: var(--green-dim);
+    background: rgba(0,212,106,0.07);
+  }
+  .badge-approved::before { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  .badge-blocked {
+    color: var(--red);
+    border-color: var(--red-dim);
+    background: rgba(255,59,92,0.07);
+  }
+  .badge-blocked::before { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+  .badge-needs_confirmation {
+    color: var(--yellow);
+    border-color: var(--yellow-dim);
+    background: rgba(240,192,0,0.07);
+  }
+  .badge-needs_confirmation::before { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+
+  /* trust tier */
+  .tier {
+    font-size: 0.62rem;
+    letter-spacing: 0.15em;
+    padding: 2px 7px;
+    border: 1px solid;
+  }
+
+  .tier-high   { color: var(--green);  border-color: var(--green-dim); }
+  .tier-medium { color: var(--amber);  border-color: var(--amber-dim); }
+  .tier-low    { color: var(--red);    border-color: var(--red-dim);   }
+
+  /* risk bar */
+  .risk-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .risk-bar-bg {
+    flex: 1;
+    height: 6px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    position: relative;
+    min-width: 60px;
+  }
+
+  .risk-bar-fill {
+    height: 100%;
+    transition: width 0.5s ease;
+  }
+
+  .risk-num {
+    font-size: 0.75rem;
+    font-family: var(--font-hud);
+    min-width: 28px;
+    text-align: right;
+  }
+
+  /* timestamps */
+  .ts {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .ts-date { display: block; }
+  .ts-time { color: var(--text); }
+
+  /* action type */
+  .action-type {
+    color: var(--accent);
+    font-size: 0.8rem;
+  }
+
+  /* user/session ids */
+  .uid {
+    font-size: 0.72rem;
+    color: var(--text);
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* reason text */
+  .reason-text {
+    font-size: 0.75rem;
+    color: var(--text);
+    max-width: 280px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* expand icon */
+  .expand-btn {
+    background: none;
+    border: 1px solid var(--border2);
+    color: var(--text-dim);
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    font-size: 0.7rem;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+
+  .expand-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .expand-btn.open  { border-color: var(--accent); color: var(--accent); transform: rotate(180deg); }
+
+  /* detail panel */
+  .detail-panel {
+    padding: 16px 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  .detail-section {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    padding: 12px 14px;
+  }
+
+  .detail-section-label {
+    font-size: 0.55rem;
+    letter-spacing: 0.3em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+
+  .detail-section pre {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-bright);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 180px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+
+  .factors-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .factor-tag {
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    padding: 3px 8px;
+    border: 1px solid var(--border2);
+    color: var(--amber);
+    background: rgba(240,165,0,0.06);
+  }
+
+  .factor-empty {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  /* empty state */
+  .empty-state {
+    text-align: center;
+    padding: 80px 24px;
+    color: var(--text-dim);
+  }
+
+  .empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 16px;
+    opacity: 0.3;
+  }
+
+  .empty-state-title {
+    font-family: var(--font-hud);
+    font-size: 0.8rem;
+    letter-spacing: 0.3em;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .empty-state-sub {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    opacity: 0.7;
+  }
+
+  /* error banner */
+  .error-banner {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 28px;
+    background: rgba(255,59,92,0.08);
+    border-bottom: 1px solid rgba(255,59,92,0.3);
+    font-size: 0.75rem;
+    color: var(--red);
+  }
+
+  .error-banner.show { display: flex; }
+
+  /* last-updated ticker */
+  .last-updated {
+    font-size: 0.6rem;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+    padding: 8px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .spinner {
+    width: 10px; height: 10px;
+    border: 1px solid var(--border2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    display: none;
+  }
+
+  .spinner.spin {
+    display: block;
+    animation: spin 0.7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* fade-in for new rows */
+  @keyframes row-in {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .row-new { animation: row-in 0.3s ease forwards; }
+
+  /* scrollbars */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-left">
+    <div class="shield-icon">
+      <svg viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.5 3.4 10.7 8 12 4.6-1.3 8-6.5 8-12V6l-8-4z"/></svg>
+    </div>
+    <div class="wordmark">
+      SHIELDCLAW
+      <span>BACKBOARD MONITOR</span>
+    </div>
+    <div class="nav-links" style="margin-left:18px">
+      <a class="nav-link active" href="/shieldclaw/backboard">BACKBOARD</a>
+      <a class="nav-link" href="/shieldclaw/auth0">AUTH0 DEBUG</a>
+      <a class="nav-link" href="/shieldclaw/debug" target="_blank">/debug JSON</a>
+    </div>
+  </div>
+
+  <div class="threat-meter">
+    <div class="threat-label">AVG THREAT LEVEL</div>
+    <div class="threat-value calm" id="threatValue">—</div>
+    <div class="threat-sub" id="threatSub">AWAITING DATA</div>
+  </div>
+
+  <div class="header-right">
+    <div class="status-dot" id="statusDot"></div>
+    <div class="status-text" id="statusText">OFFLINE</div>
+  </div>
+</header>
+
+<!-- SYSTEM STATUS STRIP -->
+<div class="sys-strip" id="sysStrip">
+  <div class="sys-chip"><span class="sys-chip-label">OPENCLAW</span><span class="sys-chip-val" id="ssOC">…</span></div>
+  <div class="sys-chip"><span class="sys-chip-label">BACKBOARD</span><span class="sys-chip-val" id="ssBB">…</span></div>
+  <div class="sys-chip"><span class="sys-chip-label">JWKS KEYS</span><span class="sys-chip-val" id="ssJWKS">…</span></div>
+  <div class="sys-chip"><span class="sys-chip-label">AUTH0</span><span class="sys-chip-val accent" id="ssAuth0">…</span></div>
+  <div class="sys-chip"><span class="sys-chip-label">EVAL MODE</span><span class="sys-chip-val purple" id="ssMode">…</span></div>
+  <div class="sys-chip"><span class="sys-chip-label">AGENTS</span><span class="sys-chip-val" id="ssAgents">…</span></div>
+  <div class="sys-chip"><span class="sys-chip-label">UPTIME</span><span class="sys-chip-val ok" id="ssUptime">…</span></div>
+</div>
+
+<!-- AUTH BAR -->
+<div class="auth-bar">
+  <span class="auth-label">BEARER TOKEN //</span>
+  <input type="password" class="auth-input" id="tokenInput" placeholder="eyJhbGciOiJSUzI1NiIsInR5c..." autocomplete="off" spellcheck="false">
+  <button class="btn btn-primary" id="fetchBtn" onclick="fetchLog()">FETCH LOG</button>
+  <button class="btn btn-dim" id="autoBtn" onclick="toggleAuto()">AUTO-REFRESH</button>
+  <span class="auth-label" style="margin-left:12px">EVAL MODE //</span>
+  <button class="btn btn-dim" id="modeThink" onclick="setEvalMode('think')" title="claude-sonnet-4-6 + extended thinking">THINK</button>
+  <button class="btn btn-dim" id="modeFast"  onclick="setEvalMode('fast')"  title="claude-haiku, no thinking">FAST</button>
+</div>
+
+<!-- ERROR BANNER -->
+<div class="error-banner" id="errorBanner">
+  <span>&#9632;</span>
+  <span id="errorMsg"></span>
+</div>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat total">
+    <div class="stat-label">TOTAL EVALUATIONS</div>
+    <div class="stat-value" id="statTotal">—</div>
+    <div class="stat-sub">all-time calls</div>
+  </div>
+  <div class="stat approved">
+    <div class="stat-label">APPROVED</div>
+    <div class="stat-value" id="statApproved">—</div>
+    <div class="stat-sub" id="statApprovedPct"></div>
+  </div>
+  <div class="stat blocked">
+    <div class="stat-label">BLOCKED</div>
+    <div class="stat-value" id="statBlocked">—</div>
+    <div class="stat-sub" id="statBlockedPct"></div>
+  </div>
+  <div class="stat risk">
+    <div class="stat-label">AVG RISK SCORE</div>
+    <div class="stat-value" id="statRisk">—</div>
+    <div class="stat-sub">out of 100</div>
+  </div>
+</div>
+
+<!-- LAST UPDATED -->
+<div class="last-updated">
+  <div class="spinner" id="spinner"></div>
+  <span id="lastUpdated">NOT YET FETCHED</span>
+</div>
+
+<!-- TABLE -->
+<div class="table-wrap">
+  <div id="emptyState" class="empty-state">
+    <div class="empty-state-icon">&#9632;</div>
+    <div class="empty-state-title">NO DATA LOADED</div>
+    <div class="empty-state-sub">Enter your bearer token and fetch the log to begin monitoring.</div>
+  </div>
+
+  <table id="logTable" style="display:none">
+    <thead>
+      <tr>
+        <th></th>
+        <th>TIMESTAMP</th>
+        <th>STATUS</th>
+        <th>ACTION TYPE</th>
+        <th>RISK</th>
+        <th>TRUST</th>
+        <th>USER</th>
+        <th>INPUT SUMMARY</th>
+        <th>REASON</th>
+      </tr>
+    </thead>
+    <tbody id="logBody"></tbody>
+  </table>
+</div>
+
+<script>
+  let autoInterval = null;
+  let logData = [];
+  let expandedRows = new Set();
+
+  // ── SYSTEM STRIP ──────────────────────────────────────────────
+  async function loadSysStrip() {
+    try {
+      const res = await fetch('/shieldclaw/auth0/status');
+      if (!res.ok) return;
+      const d = await res.json();
+
+      const ss = (id, val, cls) => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = val; el.className = 'sys-chip-val ' + (cls||''); }
+      };
+
+      ss('ssOC',     d.openclaw.reachable  ? '✓ ' + d.openclaw.latency_ms + 'ms' : '✗ DOWN',   d.openclaw.reachable ? 'ok' : 'error');
+      ss('ssBB',     d.backboard.reachable ? '✓ ' + d.backboard.latency_ms + 'ms' : (d.backboard.api_key_set ? '? NO RESP' : '✗ NO KEY'), d.backboard.reachable ? 'ok' : 'warn');
+      ss('ssJWKS',   d.jwks.healthy ? d.jwks.key_count + ' keys (age ' + d.jwks.age_seconds + 's)' : 'NOT CACHED', d.jwks.healthy ? 'ok' : 'error');
+      ss('ssAuth0',  d.auth0.domain, 'accent');
+      ss('ssMode',   d.backboard.current_eval_mode.toUpperCase(), 'purple');
+      ss('ssAgents', d.agent_registry.active + ' active / ' + d.agent_registry.total + ' total', d.agent_registry.active > 0 ? 'ok' : '');
+      const up = d.system.uptime_seconds;
+      const upStr = up < 60 ? up + 's' : up < 3600 ? Math.floor(up/60) + 'm' : Math.floor(up/3600) + 'h ' + Math.floor((up%3600)/60) + 'm';
+      ss('ssUptime', upStr, 'ok');
+    } catch(_) {}
+  }
+
+  loadSysStrip();
+  setInterval(loadSysStrip, 15000);
+
+  // ── FETCH ─────────────────────────────────────────────────────────────
+  async function fetchLog() {
+    const token = document.getElementById('tokenInput').value.trim();
+    if (!token) {
+      showError('No bearer token provided.');
+      return;
+    }
+
+    setLoading(true);
+    hideError();
+
+    try {
+      const res = await fetch('/shieldclaw/backboard/log', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(`HTTP ${res.status}: ${err.detail || res.statusText}`);
+      }
+
+      const data = await res.json();
+      logData = (data.log || []).slice().reverse(); // newest first
+      renderAll();
+      setOnline(true);
+      loadEvalMode();
+      document.getElementById('lastUpdated').textContent =
+        'LAST UPDATED: ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+
+    } catch (e) {
+      showError(e.message);
+      setOnline(false);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── RENDER ────────────────────────────────────────────────────────────
+  function renderAll() {
+    renderStats();
+    renderTable();
+  }
+
+  function renderStats() {
+    const total    = logData.length;
+    const approved = logData.filter(r => r.status === 'approved').length;
+    const blocked  = logData.filter(r => r.status === 'blocked').length;
+    const avgRisk  = total ? (logData.reduce((s, r) => s + r.risk_score, 0) / total) : 0;
+    const pct      = n => total ? Math.round(n / total * 100) + '%' : '—';
+
+    document.getElementById('statTotal').textContent    = total;
+    document.getElementById('statApproved').textContent = approved;
+    document.getElementById('statBlocked').textContent  = blocked;
+    document.getElementById('statRisk').textContent     = avgRisk.toFixed(1);
+    document.getElementById('statApprovedPct').textContent = pct(approved);
+    document.getElementById('statBlockedPct').textContent  = pct(blocked);
+
+    // Threat meter
+    const tv = document.getElementById('threatValue');
+    const ts = document.getElementById('threatSub');
+    tv.textContent = avgRisk.toFixed(1);
+    tv.className   = 'threat-value ' + riskClass(avgRisk);
+    ts.textContent = avgRisk < 30 ? 'NOMINAL' : avgRisk < 65 ? 'ELEVATED' : 'CRITICAL';
+  }
+
+  function riskClass(score) {
+    if (score < 30) return 'calm';
+    if (score < 65) return 'warn';
+    return 'alert';
+  }
+
+  function riskColor(score) {
+    if (score < 30) return 'var(--green)';
+    if (score < 65) return 'var(--amber)';
+    return 'var(--red)';
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('logBody');
+    const empty = document.getElementById('emptyState');
+    const table = document.getElementById('logTable');
+
+    if (!logData.length) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      return;
+    }
+
+    table.style.display = '';
+    empty.style.display = 'none';
+
+    // Remember which detail rows are open
+    const open = new Set(expandedRows);
+
+    tbody.innerHTML = '';
+    logData.forEach((entry, i) => {
+      // Main row
+      const tr = document.createElement('tr');
+      tr.className = 'row-new';
+      tr.style.animationDelay = Math.min(i * 0.02, 0.3) + 's';
+      tr.dataset.idx = i;
+      tr.onclick = () => toggleDetail(i);
+
+      const d   = new Date(entry.timestamp);
+      const date = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+      const time = d.toLocaleTimeString('en-US', { hour12: false });
+
+      tr.innerHTML = `
+        <td><button class="expand-btn ${open.has(i) ? 'open' : ''}" id="exp-${i}">&#9660;</button></td>
+        <td class="ts"><span class="ts-date">${date}</span><span class="ts-time">${time}</span></td>
+        <td><span class="badge badge-${entry.status}">${entry.status.replace('_', ' ').toUpperCase()}</span></td>
+        <td class="action-type">${esc(entry.action_type)}</td>
+        <td>
+          <div class="risk-bar-wrap">
+            <div class="risk-bar-bg">
+              <div class="risk-bar-fill" style="width:${entry.risk_score}%;background:${riskColor(entry.risk_score)}"></div>
+            </div>
+            <span class="risk-num" style="color:${riskColor(entry.risk_score)}">${Math.round(entry.risk_score)}</span>
+          </div>
+        </td>
+        <td><span class="tier tier-${entry.trust_tier}">${entry.trust_tier.toUpperCase()}</span></td>
+        <td><span class="uid" title="${esc(entry.user_id)}">${esc(entry.user_id)}</span></td>
+        <td><span class="reason-text" title="${esc(entry.input_summary)}">${esc(entry.input_summary || '—')}</span></td>
+        <td><span class="reason-text" title="${esc(entry.reason)}">${esc(entry.reason)}</span></td>
+      `;
+
+      tbody.appendChild(tr);
+
+      // Detail row (shown only if open)
+      const dr = document.createElement('tr');
+      dr.className = 'detail-row';
+      dr.id = `detail-${i}`;
+      dr.style.display = open.has(i) ? '' : 'none';
+
+      const factors = (entry.factors && entry.factors.length)
+        ? entry.factors.map(f => `<span class="factor-tag">${esc(f)}</span>`).join('')
+        : '<span class="factor-empty">none</span>';
+
+      const matchedRules = (entry.matched_rules && entry.matched_rules.length)
+        ? entry.matched_rules.map(f => `<span class="factor-tag" style="color:var(--accent);background:rgba(0,170,255,0.06)">${esc(f)}</span>`).join('')
+        : '<span class="factor-empty">none</span>';
+
+      const matchedPrefs = (entry.matched_preferences && entry.matched_preferences.length)
+        ? entry.matched_preferences.map(f => `<span class="factor-tag" style="color:var(--green);background:rgba(0,212,106,0.06)">${esc(f)}</span>`).join('')
+        : '<span class="factor-empty">none</span>';
+
+      const payloadStr = JSON.stringify(entry.payload, null, 2);
+      const hasReasoning = entry.reasoning && entry.reasoning.trim().length > 0;
+      const hasTrace = entry.trace_id || entry.input_summary || entry.output_summary;
+
+      dr.innerHTML = `
+        <td colspan="9" style="padding:0">
+          <div class="detail-panel" style="grid-template-columns: 1fr 1fr${hasReasoning ? ' 1fr' : ''}">
+            <div class="detail-section" style="grid-column: 1/2">
+              <div class="detail-section-label">PAYLOAD</div>
+              <pre>${esc(payloadStr)}</pre>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div class="detail-section">
+                <div class="detail-section-label">RISK FACTORS</div>
+                <div class="factors-list">${factors}</div>
+              </div>
+              <div class="detail-section">
+                <div class="detail-section-label">MATCHED RULES</div>
+                <div class="factors-list">${matchedRules}</div>
+              </div>
+              <div class="detail-section">
+                <div class="detail-section-label">MATCHED PREFERENCES</div>
+                <div class="factors-list">${matchedPrefs}</div>
+              </div>
+              <div class="detail-section">
+                <div class="detail-section-label">SESSION / THREAD / TRACE</div>
+                <pre style="font-size:0.7rem;color:var(--text)">session : ${esc(entry.session_id || '—')}
+thread  : ${esc(entry.thread_id || '—')}
+trace   : ${esc(entry.trace_id || '—')}</pre>
+              </div>
+              ${hasTrace ? `
+              <div class="detail-section">
+                <div class="detail-section-label">INPUT SUMMARY</div>
+                <pre style="white-space:pre-wrap;color:var(--text-bright)">${esc(entry.input_summary || '—')}</pre>
+              </div>
+              <div class="detail-section">
+                <div class="detail-section-label">OUTPUT SUMMARY</div>
+                <pre style="white-space:pre-wrap;color:var(--text-bright)">${esc(entry.output_summary || '—')}</pre>
+              </div>` : ''}
+              <div class="detail-section">
+                <div class="detail-section-label">FULL REASON</div>
+                <pre style="white-space:pre-wrap">${esc(entry.reason)}</pre>
+              </div>
+            </div>
+            ${hasReasoning ? `
+            <div class="detail-section" style="border-left: 2px solid var(--accent); background: rgba(0,170,255,0.03)">
+              <div class="detail-section-label" style="color:var(--accent);letter-spacing:0.3em">&#9632; CLAUDE INTERNAL REASONING</div>
+              <pre style="white-space:pre-wrap;max-height:320px;color:var(--text-bright);font-size:0.72rem;line-height:1.55">${esc(entry.reasoning)}</pre>
+            </div>` : ''}
+          </div>
+        </td>
+      `;
+
+      tbody.appendChild(dr);
+    });
+  }
+
+  function toggleDetail(idx) {
+    const dr  = document.getElementById(`detail-${idx}`);
+    const btn = document.getElementById(`exp-${idx}`);
+    if (!dr) return;
+
+    if (expandedRows.has(idx)) {
+      expandedRows.delete(idx);
+      dr.style.display = 'none';
+      btn && btn.classList.remove('open');
+    } else {
+      expandedRows.add(idx);
+      dr.style.display = '';
+      btn && btn.classList.add('open');
+    }
+  }
+
+  // ── AUTO-REFRESH ──────────────────────────────────────────────────────
+  function toggleAuto() {
+    const btn = document.getElementById('autoBtn');
+    if (autoInterval) {
+      clearInterval(autoInterval);
+      autoInterval = null;
+      btn.classList.remove('active');
+      btn.textContent = 'AUTO-REFRESH';
+      document.getElementById('statusDot').classList.remove('live');
+      document.getElementById('statusText').textContent = 'MANUAL';
+    } else {
+      fetchLog();
+      autoInterval = setInterval(fetchLog, 10000);
+      btn.classList.add('active');
+      btn.textContent = 'AUTO: ON (10s)';
+    }
+  }
+
+  // ── HELPERS ───────────────────────────────────────────────────────────
+  function setLoading(on) {
+    document.getElementById('spinner').classList.toggle('spin', on);
+    document.getElementById('fetchBtn').disabled = on;
+  }
+
+  function setOnline(on) {
+    document.getElementById('statusDot').classList.toggle('live', on);
+    document.getElementById('statusText').textContent = on ? 'LIVE' : 'ERROR';
+  }
+
+  function showError(msg) {
+    const b = document.getElementById('errorBanner');
+    document.getElementById('errorMsg').textContent = msg;
+    b.classList.add('show');
+  }
+
+  function hideError() {
+    document.getElementById('errorBanner').classList.remove('show');
+  }
+
+  function esc(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── EVAL MODE ─────────────────────────────────────────────────────────
+  async function loadEvalMode() {
+    const token = document.getElementById('tokenInput').value.trim();
+    if (!token) return;
+    try {
+      const res = await fetch('/shieldclaw/backboard/config', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      applyModeUI(data.eval_mode);
+    } catch (_) {}
+  }
+
+  async function setEvalMode(mode) {
+    const token = document.getElementById('tokenInput').value.trim();
+    if (!token) { showError('No bearer token — cannot change mode.'); return; }
+    try {
+      const res = await fetch('/shieldclaw/backboard/config', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eval_mode: mode }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || res.statusText);
+      }
+      const data = await res.json();
+      applyModeUI(data.eval_mode);
+    } catch (e) {
+      showError('Mode change failed: ' + e.message);
+    }
+  }
+
+  function applyModeUI(mode) {
+    const think = document.getElementById('modeThink');
+    const fast  = document.getElementById('modeFast');
+    think.classList.toggle('active', mode === 'think');
+    fast.classList.toggle('active',  mode === 'fast');
+  }
+
+  // allow Enter to fetch
+  document.getElementById('tokenInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') fetchLog();
+  });
+</script>
+</body>
+</html>

@@ -1,25 +1,81 @@
+import asyncio
+import json
+import os
+import sys
 import time
 import uuid
 import logging
 from typing import Optional
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from jose import jwt, JWTError
 
 from agent_identity import AgentRegistry, AgentRegistration, Auth0ManagementClient
 from data_policy import redact_response, get_data_policy_summary, SENSITIVE_PATTERNS
 from policy_parser import parse_policy
+from jacob.shieldbot import evaluate, ActionRequest
+from jacob.shieldbot import logger as shieldbot_logger
+from jacob.shieldbot import config as shieldbot_config
+
+load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Dev bypass — run with DEV_BYPASS=true to skip Auth0 JWT verification.
+# Use `python main.py --register` to print a fake agent credential and exit.
+# ---------------------------------------------------------------------------
+
+DEV_BYPASS = os.getenv("DEV_BYPASS", "").lower() in ("1", "true", "yes")
+
+# Fake dev agent pre-seeded when DEV_BYPASS is on
+_DEV_AGENT = {
+    "agent_id": "agent_dev000000",
+    "agent_name": "dev-agent",
+    "auth0_client_id": "dev-client-id",
+    "owner_sub": "dev-user@devlocal",
+    "scopes": ["gateway:read", "gateway:message", "gateway:tools", "gateway:canvas"],
+    "created_at": 0.0,
+    "data_access": [],  # populated after SENSITIVE_PATTERNS is imported
+    "revoked": False,
+}
+_DEV_TOKEN = "dev-bypass-token"
+
+
+def _maybe_register_and_exit():
+    """If invoked with --register, print dev credentials and exit."""
+    if "--register" not in sys.argv:
+        return
+    if not DEV_BYPASS:
+        print("ERROR: DEV_BYPASS env var must be set to use --register.")
+        sys.exit(1)
+    _DEV_AGENT["data_access"] = list(SENSITIVE_PATTERNS.keys())
+    print("\n=== ShieldClaw Dev Registration ===")
+    print(f"  DEV_BYPASS  : enabled")
+    print(f"  agent_id    : {_DEV_AGENT['agent_id']}")
+    print(f"  agent_name  : {_DEV_AGENT['agent_name']}")
+    print(f"  client_id   : {_DEV_AGENT['auth0_client_id']}")
+    print(f"  owner_sub   : {_DEV_AGENT['owner_sub']}")
+    print(f"  scopes      : {_DEV_AGENT['scopes']}")
+    print(f"  data_access : {_DEV_AGENT['data_access']}")
+    print(f"\n  Use this header on every request:")
+    print(f"    Authorization: Bearer {_DEV_TOKEN}")
+    print(f"\n  The dev agent token bypasses Auth0 JWT verification entirely.")
+    print(f"  ShieldBot still runs — set SHIELDBOT_BYPASS=true to also skip it.\n")
+    sys.exit(0)
+
+
+_maybe_register_and_exit()
 
 # --- Config ---
 
-AUTH0_DOMAIN = "codcodingcode.ca.auth0.com"
-AUTH0_CLIENT_ID = "b7FYYgwB9iyUYUNi3FGbYuotKAkegQv9"
-AUTH0_AUDIENCE = "https://shieldclaw-gateway"
+AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
+AUTH0_CLIENT_ID = os.getenv("AUTH0_CLIENT_ID")
+AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
 AUTH0_ALGORITHMS = ["RS256"]
-OPENCLAW_UPSTREAM = "http://127.0.0.1:18789"
-SHIELDCLAW_PORT = 8443
+OPENCLAW_UPSTREAM = os.getenv("OPENCLAW_UPSTREAM", "http://127.0.0.1:18789")
+SHIELDCLAW_PORT = int(os.getenv("SHIELDCLAW_PORT", "8443"))
 
 JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
 ISSUER = f"https://{AUTH0_DOMAIN}/"
@@ -79,32 +135,59 @@ EXEC_ROUTE_PREFIXES = ["/api/v1/exec"]
 ADMIN_ROUTE_PREFIXES = ["/api/v1/config", "/api/v1/admin"]
 
 
+def scopes_to_trust_tier(scopes: set[str]) -> str:
+    """Derive ShieldBot trust tier from token scopes.
+
+    gateway:tools:exec or gateway:admin → low  (very conservative)
+    gateway:tools or gateway:message    → medium
+    gateway:read only                   → high  (approve freely)
+    """
+    if "gateway:tools:exec" in scopes or "gateway:admin" in scopes:
+        return "low"
+    if "gateway:tools" in scopes or "gateway:message" in scopes:
+        return "medium"
+    return "high"
+
+
+def build_action_request(
+    identity: dict,
+    method: str,
+    path: str,
+    body: bytes,
+    payload_claims: dict,
+) -> ActionRequest:
+    """Build a ShieldBot ActionRequest from an HTTP proxy request."""
+    user_id = identity.get("agent_id") or identity.get("user_sub", "unknown")
+    session_id = payload_claims.get("sub", "unknown")
+
+    path_parts = path.strip("/").split("/")
+    resource = path_parts[1] if len(path_parts) > 1 else (path_parts[0] if path_parts else "unknown")
+    action_type = f"{method.lower()}:{resource}"
+
+    try:
+        body_dict = json.loads(body) if body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        body_dict = {}
+
+    return ActionRequest(
+        user_id=user_id,
+        session_id=session_id,
+        action_type=action_type,
+        payload={"method": method, "path": path, "body": body_dict},
+    )
+
+
 def check_scopes(token_scopes: set[str], request_path: str) -> Optional[str]:
-    """Return an error message if the token lacks required scopes for this route."""
-    # Admin routes
+    """Return an error message if the token lacks required scopes for this route.
+
+    Only hard-blocks admin routes (management operations). Everything else is
+    allowed through to ShieldBot for risk evaluation — agents need full hands.
+    """
+    # Admin/management routes still require explicit admin scope
     for prefix in ADMIN_ROUTE_PREFIXES:
         if request_path.startswith(prefix):
             if "gateway:admin" not in token_scopes:
                 return f"Scope 'gateway:admin' required for {request_path}"
-
-    # Exec routes (dangerous)
-    for prefix in EXEC_ROUTE_PREFIXES:
-        if request_path.startswith(prefix):
-            if "gateway:tools:exec" not in token_scopes:
-                return f"Scope 'gateway:tools:exec' required for {request_path}"
-
-    # Standard route scopes
-    for route_prefix, required_scopes in ROUTE_SCOPES.items():
-        if request_path.startswith(route_prefix):
-            if not token_scopes & required_scopes:
-                return f"One of {required_scopes} required for {request_path}"
-
-    # Read-only routes (probes, status) require at least gateway:read
-    if request_path.startswith("/api/v1/") and not token_scopes & {
-        "gateway:read", "gateway:message", "gateway:tools",
-        "gateway:tools:exec", "gateway:admin",
-    }:
-        return "At least 'gateway:read' scope required"
 
     return None
 
@@ -114,6 +197,21 @@ def check_scopes(token_scopes: set[str], request_path: str) -> Optional[str]:
 async def verify_token(request: Request) -> dict:
     """Extract, verify, and decode the Auth0 JWT from the Authorization header."""
     auth_header = request.headers.get("Authorization", "")
+
+    # Dev bypass: accept any Bearer dev-* token without hitting Auth0
+    if DEV_BYPASS and auth_header == f"Bearer {_DEV_TOKEN}":
+        scopes = " ".join(_DEV_AGENT["scopes"])
+        return {
+            "sub": f"{_DEV_AGENT['auth0_client_id']}@clients",
+            "gty": "client-credentials",
+            "azp": _DEV_AGENT["auth0_client_id"],
+            "scope": scopes,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 86400,
+            "iss": ISSUER,
+            "aud": AUTH0_AUDIENCE,
+        }
+
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
 
@@ -151,12 +249,16 @@ async def verify_token(request: Request) -> dict:
             issuer=ISSUER,
         )
     except jwt.ExpiredSignatureError:
+        _record_debug_event("auth_failed", {"reason": "token_expired", "kid": kid})
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.JWTClaimsError as e:
+        _record_debug_event("auth_failed", {"reason": "invalid_claims", "detail": str(e), "kid": kid})
         raise HTTPException(status_code=401, detail=f"Invalid claims: {e}")
     except JWTError as e:
+        _record_debug_event("auth_failed", {"reason": "jwt_error", "detail": str(e), "kid": kid})
         raise HTTPException(status_code=401, detail=f"Token verification failed: {e}")
 
+    _record_debug_event("auth_ok", {"sub": payload.get("sub"), "kid": kid, "aud": payload.get("aud")})
     return payload
 
 
@@ -187,6 +289,14 @@ def classify_identity(payload: dict) -> dict:
         # Extract client_id from sub (format: <client_id>@clients)
         client_id = sub.replace("@clients", "") if sub.endswith("@clients") else azp
         identity["agent_client_id"] = client_id
+
+        # Dev bypass: inject the fake agent record directly, skip registry lookup
+        if DEV_BYPASS and client_id == _DEV_AGENT["auth0_client_id"]:
+            _DEV_AGENT["data_access"] = list(SENSITIVE_PATTERNS.keys())
+            identity["agent_id"] = _DEV_AGENT["agent_id"]
+            identity["agent_name"] = _DEV_AGENT["agent_name"]
+            identity["owner_sub"] = _DEV_AGENT["owner_sub"]
+            return identity
 
         # Look up agent in registry for metadata
         agent_record = agent_registry.get_by_client_id(client_id)
@@ -422,10 +532,12 @@ async def data_policy(request: Request):
             ),
         }
 
-    agent_record = agent_registry.get_by_client_id(
-        identity.get("agent_client_id", "")
-    )
-    agent_data_access = set(agent_record.get("data_access", [])) if agent_record else set()
+    _client_id = identity.get("agent_client_id", "")
+    if DEV_BYPASS and _client_id == _DEV_AGENT["auth0_client_id"]:
+        agent_data_access = set(SENSITIVE_PATTERNS.keys())
+    else:
+        agent_record = agent_registry.get_by_client_id(_client_id)
+        agent_data_access = set(agent_record.get("data_access", [])) if agent_record else set()
 
     return {
         "identity_type": "agent",
@@ -596,6 +708,242 @@ async def identity_report(request: Request):
     return report
 
 
+# --- Debug Endpoint ---
+
+# Ring buffer of recent auth events for the debug view
+_debug_log: list[dict] = []
+_DEBUG_LOG_MAX = 50
+
+def _record_debug_event(event: str, detail: dict):
+    _debug_log.append({"ts": time.time(), "event": event, **detail})
+    if len(_debug_log) > _DEBUG_LOG_MAX:
+        _debug_log.pop(0)
+
+
+@app.get("/shieldclaw/debug")
+async def debug():
+    """No-auth debug endpoint: shows Auth0 config, JWKS cache, OpenClaw reachability, and recent auth events."""
+    # Check OpenClaw reachability
+    openclaw_ok = False
+    openclaw_error = None
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(f"{OPENCLAW_UPSTREAM}/health")
+            openclaw_ok = r.status_code < 500
+    except Exception as e:
+        openclaw_error = str(e)
+
+    # JWKS cache status
+    jwks_cached = _jwks_cache is not None
+    jwks_age = int(time.time() - _jwks_fetched_at) if jwks_cached else None
+    jwks_key_count = len(_jwks_cache.get("keys", [])) if jwks_cached else 0
+
+    return {
+        "shieldclaw": "running",
+        "config": {
+            "auth0_domain": AUTH0_DOMAIN,
+            "audience": AUTH0_AUDIENCE,
+            "algorithms": AUTH0_ALGORITHMS,
+            "openclaw_upstream": OPENCLAW_UPSTREAM,
+            "port": SHIELDCLAW_PORT,
+        },
+        "jwks_cache": {
+            "cached": jwks_cached,
+            "age_seconds": jwks_age,
+            "ttl_seconds": JWKS_CACHE_TTL,
+            "key_count": jwks_key_count,
+            "url": JWKS_URL,
+        },
+        "openclaw": {
+            "reachable": openclaw_ok,
+            "error": openclaw_error,
+        },
+        "agent_registry": {
+            "total_agents": len(agent_registry.list_agents()),
+            "active_agents": len([a for a in agent_registry.list_agents() if not a["revoked"]]),
+        },
+        "recent_auth_events": list(reversed(_debug_log)),
+    }
+
+
+# --- Backboard Dashboard ---
+
+@app.get("/shieldclaw/backboard", response_class=HTMLResponse)
+async def backboard_dashboard():
+    """Serve the Backboard audit log dashboard."""
+    dashboard_path = __file__.replace("main.py", "dashboard.html")
+    with open(dashboard_path) as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.get("/shieldclaw/backboard/log")
+async def backboard_log(request: Request):
+    """Return the Backboard audit log as JSON. Requires gateway:admin scope."""
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+    return JSONResponse(content={"log": shieldbot_logger.get_audit_log()})
+
+
+@app.get("/shieldclaw/backboard/config")
+async def backboard_get_config(request: Request):
+    """Return current Shieldbot runtime config. Requires gateway:admin scope."""
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+    return JSONResponse(content=shieldbot_config.get_config())
+
+
+@app.post("/shieldclaw/backboard/config")
+async def backboard_set_config(request: Request):
+    """Update Shieldbot runtime config. Requires gateway:admin scope.
+
+    Body: { "eval_mode": "think" | "fast" }
+    """
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+    body = await request.json()
+    if "eval_mode" in body:
+        try:
+            shieldbot_config.set_eval_mode(body["eval_mode"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse(content=shieldbot_config.get_config())
+
+
+# --- Auth0 Debug Dashboard ---
+
+@app.get("/shieldclaw/auth0", response_class=HTMLResponse)
+async def auth0_dashboard():
+    """Serve the Auth0 debug dashboard."""
+    dashboard_path = __file__.replace("main.py", "auth0_dashboard.html")
+    with open(dashboard_path) as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.get("/shieldclaw/auth0/status")
+async def auth0_status():
+    """No-auth: return full Auth0 config, JWKS health, recent auth events, agent registry, Backboard connectivity."""
+    import platform, sys
+
+    # JWKS health
+    jwks_cached = _jwks_cache is not None
+    jwks_age = int(time.time() - _jwks_fetched_at) if jwks_cached else None
+    jwks_key_ids = [k.get("kid") for k in _jwks_cache.get("keys", [])] if jwks_cached else []
+
+    # OpenClaw reachability
+    openclaw_ok = False
+    openclaw_error = None
+    openclaw_latency_ms = None
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            t0 = time.time()
+            r = await client.get(f"{OPENCLAW_UPSTREAM}/health")
+            openclaw_latency_ms = round((time.time() - t0) * 1000, 1)
+            openclaw_ok = r.status_code < 500
+    except Exception as e:
+        openclaw_error = str(e)
+
+    # Backboard reachability
+    from jacob.shieldbot import config as _sc
+    backboard_ok = False
+    backboard_error = None
+    backboard_latency_ms = None
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            t0 = time.time()
+            r = await client.get(
+                f"{_sc.BACKBOARD_BASE_URL}/health",
+                headers={"X-API-Key": _sc.BACKBOARD_API_KEY},
+            )
+            backboard_latency_ms = round((time.time() - t0) * 1000, 1)
+            backboard_ok = r.status_code < 500
+    except Exception as e:
+        backboard_error = str(e)
+
+    # Agent registry summary
+    all_agents = agent_registry.list_agents()
+    active_agents = [a for a in all_agents if not a["revoked"]]
+    revoked_agents = [a for a in all_agents if a["revoked"]]
+
+    return {
+        "timestamp": time.time(),
+        "system": {
+            "python": sys.version,
+            "platform": platform.platform(),
+            "shieldclaw_port": SHIELDCLAW_PORT,
+            "uptime_since": _server_start_time,
+            "uptime_seconds": round(time.time() - _server_start_time, 1),
+        },
+        "auth0": {
+            "domain": AUTH0_DOMAIN,
+            "audience": AUTH0_AUDIENCE,
+            "algorithms": AUTH0_ALGORITHMS,
+            "issuer": ISSUER,
+            "jwks_url": JWKS_URL,
+            "client_id_configured": bool(AUTH0_CLIENT_ID),
+        },
+        "jwks": {
+            "cached": jwks_cached,
+            "age_seconds": jwks_age,
+            "ttl_seconds": JWKS_CACHE_TTL,
+            "key_count": len(jwks_key_ids),
+            "key_ids": jwks_key_ids,
+            "healthy": jwks_cached,
+        },
+        "openclaw": {
+            "url": OPENCLAW_UPSTREAM,
+            "reachable": openclaw_ok,
+            "latency_ms": openclaw_latency_ms,
+            "error": openclaw_error,
+        },
+        "backboard": {
+            "url": _sc.BACKBOARD_BASE_URL,
+            "api_key_set": bool(_sc.BACKBOARD_API_KEY),
+            "reachable": backboard_ok,
+            "latency_ms": backboard_latency_ms,
+            "error": backboard_error,
+            "think_model": _sc.BACKBOARD_THINK_MODEL,
+            "fast_model": _sc.BACKBOARD_FAST_MODEL,
+            "current_eval_mode": _sc.get_eval_mode(),
+        },
+        "agent_registry": {
+            "total": len(all_agents),
+            "active": len(active_agents),
+            "revoked": len(revoked_agents),
+            "agents": [
+                {
+                    "agent_id": a["agent_id"],
+                    "agent_name": a["agent_name"],
+                    "owner_sub": a["owner_sub"],
+                    "scopes": a["scopes"],
+                    "revoked": a["revoked"],
+                    "created_at": a["created_at"],
+                }
+                for a in all_agents
+            ],
+        },
+        "route_scopes": {k: list(v) for k, v in ROUTE_SCOPES.items()},
+        "recent_auth_events": list(reversed(_debug_log)),
+        "scope_definitions": {
+            "gateway:read": {"risk": "low", "description": "Status and probe access"},
+            "gateway:message": {"risk": "medium", "description": "Send/receive messages to AI"},
+            "gateway:tools": {"risk": "medium", "description": "Invoke tools"},
+            "gateway:tools:exec": {"risk": "critical", "description": "Execute arbitrary commands"},
+            "gateway:canvas": {"risk": "low", "description": "Canvas/UI access"},
+            "gateway:admin": {"risk": "critical", "description": "Full admin + agent management"},
+        },
+    }
+
+
+# Track server start time for uptime display
+_server_start_time = time.time()
+
+
 # --- Proxy ---
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
@@ -617,6 +965,21 @@ async def proxy(request: Request, path: str):
     if scope_error:
         log_request(identity, token_scopes, request.method, request_path, 403)
         raise HTTPException(status_code=403, detail=scope_error)
+
+    # --- ShieldBot Evaluation (agents only) ---
+    if identity["is_agent"]:
+        body = await request.body()
+        action_req = build_action_request(identity, request.method, request_path, body, payload)
+        trust_tier = scopes_to_trust_tier(token_scopes)
+
+        decision = await asyncio.to_thread(evaluate, action_req, trust_tier)
+
+        if decision.status in ("blocked", "needs_confirmation"):
+            log_request(identity, token_scopes, request.method, request_path, 403)
+            raise HTTPException(
+                status_code=403,
+                detail=f"[ShieldBot] {decision.reason} (risk={decision.risk_score:.0f}, factors={decision.factors})",
+            )
 
     # Build upstream headers — set identity for OpenClaw trusted-proxy mode
     upstream_headers = dict(request.headers)
@@ -655,10 +1018,12 @@ async def proxy(request: Request, path: str):
     # --- Data Isolation: redact sensitive content for agent identities ---
     response_body = response.content
     if identity["is_agent"]:
-        agent_record = agent_registry.get_by_client_id(
-            identity.get("agent_client_id", "")
-        )
-        agent_data_access = set(agent_record.get("data_access", [])) if agent_record else set()
+        _cid = identity.get("agent_client_id", "")
+        if DEV_BYPASS and _cid == _DEV_AGENT["auth0_client_id"]:
+            agent_data_access = set(SENSITIVE_PATTERNS.keys())
+        else:
+            agent_record = agent_registry.get_by_client_id(_cid)
+            agent_data_access = set(agent_record.get("data_access", [])) if agent_record else set()
         response_body = redact_response(response_body, identity, agent_data_access)
 
     # Forward response back to client
@@ -674,9 +1039,22 @@ async def proxy(request: Request, path: str):
 
 
 if __name__ == "__main__":
+    import threading
+    import webbrowser
     import uvicorn
+
+    def _open_dashboards():
+        import time as _time
+        _time.sleep(1.5)  # wait for uvicorn to bind
+        base = f"http://localhost:{SHIELDCLAW_PORT}"
+        webbrowser.open(f"{base}/shieldclaw/backboard")
+        webbrowser.open(f"{base}/shieldclaw/auth0")
+
+    threading.Thread(target=_open_dashboards, daemon=True).start()
 
     logger.info(f"ShieldClaw starting on port {SHIELDCLAW_PORT}")
     logger.info(f"Auth0 domain: {AUTH0_DOMAIN}")
     logger.info(f"Proxying to OpenClaw at: {OPENCLAW_UPSTREAM}")
+    logger.info(f"Backboard dashboard → http://localhost:{SHIELDCLAW_PORT}/shieldclaw/backboard")
+    logger.info(f"Auth0 debug panel  → http://localhost:{SHIELDCLAW_PORT}/shieldclaw/auth0")
     uvicorn.run(app, host="0.0.0.0", port=SHIELDCLAW_PORT)

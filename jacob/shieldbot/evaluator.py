@@ -1,17 +1,24 @@
-"""Central evaluation pipeline — powered by Backboard.io LLM routing.
+"""Central evaluation pipeline — Claude-powered, routed through Backboard.
 
-Any action type is accepted. The LLM classifies it and returns a structured
-safety decision. No hardcoded rules, no fixed action types.
-LLM calls go through Backboard.io (GPT-4o by default), so threads and memory
-are automatically integrated.
+LLM calls go through Backboard's unified API when a BACKBOARD_API_KEY is set,
+falling back to direct Anthropic if not. eval_mode is toggled live via config:
+
+    "think" → claude-sonnet-4-6 with extended thinking (interpretable reasoning)
+    "fast"  → claude-haiku-4-5 without thinking (low latency)
+
+Model switching requires zero code changes — just flip config.set_eval_mode().
 """
 
 from __future__ import annotations
 
 import json
+import os
+
+import anthropic
+import httpx
 
 from .types import ActionRequest, Decision
-from . import thread_manager, memory, logger, backboard_client
+from . import thread_manager, memory, logger, config, backboard_client
 from .trace import DecisionTrace, build_decision_trace
 from .capture import (
     OpenClawInput,
@@ -21,6 +28,10 @@ from .capture import (
     capture_openclaw_output,
 )
 from . import backboard
+
+_trace_log: list[dict] = []
+
+_anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 _BASE_SYSTEM_PROMPT = """You are a security policy engine for an AI agent system.
 
@@ -66,6 +77,92 @@ def _build_system_prompt(trust_tier: str) -> str:
     return f"{_BASE_SYSTEM_PROMPT}\n\n{tier_instruction}"
 
 
+# ---------------------------------------------------------------------------
+# LLM call — Backboard unified API or direct Anthropic fallback
+# ---------------------------------------------------------------------------
+
+def _call_via_backboard(eval_mode: str, system: str, user_message: str) -> tuple[str, str | None]:
+    """Route through Backboard's unified API."""
+    model = config.BACKBOARD_THINK_MODEL if eval_mode == "think" else config.BACKBOARD_FAST_MODEL
+
+    body: dict = {
+        "model": model,
+        "system": system,
+        "messages": [{"role": "user", "content": user_message}],
+    }
+
+    if eval_mode == "think":
+        body["max_tokens"] = 16000
+        body["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+    else:
+        body["max_tokens"] = 256
+
+    headers = {
+        "X-API-Key": config.BACKBOARD_API_KEY,
+        "Content-Type": "application/json",
+    }
+
+    resp = httpx.post(
+        f"{config.BACKBOARD_BASE_URL}/messages",
+        json=body,
+        headers=headers,
+        timeout=120,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    raw = ""
+    thinking_text = None
+    for block in data.get("content", []):
+        if block.get("type") == "thinking":
+            thinking_text = block.get("thinking", "")
+        elif block.get("type") == "text":
+            raw = block.get("text", "").strip()
+
+    return raw, thinking_text
+
+
+def _call_direct_anthropic(eval_mode: str, system: str, user_message: str) -> tuple[str, str | None]:
+    """Fallback: call Anthropic directly."""
+    thinking_text = None
+
+    if eval_mode == "think":
+        response = _anthropic_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=16000,
+            thinking={"type": "enabled", "budget_tokens": 10000},
+            system=system,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        raw = ""
+        for block in response.content:
+            if block.type == "thinking":
+                thinking_text = block.thinking
+            elif block.type == "text":
+                raw = block.text.strip()
+    else:
+        response = _anthropic_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            system=system,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        raw = response.content[0].text.strip()
+
+    return raw, thinking_text
+
+
+def _call_llm(eval_mode: str, system: str, user_message: str) -> tuple[str, str | None]:
+    """Route to Backboard if configured, else call Anthropic directly."""
+    if config.use_backboard():
+        return _call_via_backboard(eval_mode, system, user_message)
+    return _call_direct_anthropic(eval_mode, system, user_message)
+
+
+# ---------------------------------------------------------------------------
+# Main evaluation entry point
+# ---------------------------------------------------------------------------
+
 def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
     thread = thread_manager.get_or_create_thread(request.session_id, request.user_id)
     thread_id = thread["thread_id"]
@@ -78,24 +175,10 @@ def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
     user_message = _build_prompt(request, merged_prefs, user_mem)
     system_prompt = _build_system_prompt(effective_tier)
 
-    full_prompt = (
-        f"{system_prompt}\n\n---\n\n{user_message}\n\n"
-        "Respond with ONLY a JSON object, no markdown fences."
-    )
-
+    eval_mode = config.get_eval_mode()
+    thinking_text = None
     try:
-        # Use a dedicated eval thread on Backboard — LLM call + memory in one shot
-        eval_thread = backboard_client.create_thread()
-        eval_thread_id = eval_thread["thread_id"]
-        resp = backboard_client.add_message(
-            eval_thread_id,
-            full_prompt,
-            memory="Auto",
-            send_to_llm="true",
-        )
-        raw = (resp.get("content") or "").strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        raw, thinking_text = _call_llm(eval_mode, system_prompt, user_message)
         parsed = json.loads(raw)
         decision = Decision(
             status=parsed["status"],
@@ -113,7 +196,7 @@ def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
             thread_id=thread_id,
         )
 
-    logger.log_decision(request, decision, effective_tier)
+    logger.log_decision(request, decision, effective_tier, thinking=thinking_text)
 
     thread_manager.append_to_thread(request.session_id, {
         "action_type": request.action_type,
@@ -166,7 +249,9 @@ def _build_prompt(
     return "\n\n".join(parts)
 
 
-# ── High-level orchestration with OpenClaw capture + decision trace ──
+# ---------------------------------------------------------------------------
+# High-level orchestration with OpenClaw capture + decision trace
+# ---------------------------------------------------------------------------
 
 def evaluate_shieldbot_request(
     *,
@@ -181,6 +266,14 @@ def evaluate_shieldbot_request(
     user_preferences: dict | None = None,
     trust_tier: str = "medium",
 ) -> tuple[Decision, DecisionTrace, InteractionRecord]:
+    """Full Shieldbot evaluation with OpenClaw capture and decision trace.
+
+    1. Captures the OpenClaw input (user request + parsed action)
+    2. Captures the OpenClaw output (proposed action)
+    3. Evaluates via LLM (Backboard or Anthropic)
+    4. Builds a structured decision trace
+    5. Returns (decision, trace, interaction_record)
+    """
     oc_input = capture_openclaw_input(
         user_request=user_request,
         action_type=action_type,
@@ -233,6 +326,7 @@ def evaluate_shieldbot_request(
 
     backboard.log_decision_trace(decision.thread_id or "", session_id, trace)
     backboard.record_interaction(session_id, record)
+    _trace_log.append(trace.to_dict())
 
     return decision, trace, record
 
@@ -243,6 +337,7 @@ def record_openclaw_interaction(
     decision: Decision,
     session_id: str,
 ) -> InteractionRecord:
+    """Record an already-evaluated interaction into the Backboard thread."""
     record = InteractionRecord(
         openclaw_input=oc_input,
         openclaw_output=oc_output,
@@ -255,3 +350,7 @@ def record_openclaw_interaction(
     )
     backboard.record_interaction(session_id, record)
     return record
+
+
+def get_trace_log() -> list[dict]:
+    return list(_trace_log)
