@@ -13,8 +13,8 @@ from typing import Any
 
 from backboard import BackboardClient
 
-API_KEY = "espr_Lr3IM1sZUkbCK3IOGBsKRpM_o55-y3G67mqXBb_rAA4"
-ASSISTANT_ID = "1cd289f2-0a4b-4974-b486-46b4c735c1e5"  # default/shared fallback
+API_KEY = "espr_aD-mbx86g3moqVIN9pPVVB529fdpj1Qz2PP-ReI3q9A"
+ASSISTANT_ID: str | None = None  # auto-created on first use
 
 _client: BackboardClient | None = None
 
@@ -41,6 +41,24 @@ def _run(coro) -> Any:
 
 def is_configured() -> bool:
     return bool(API_KEY)
+
+
+def _get_default_assistant_id() -> str:
+    """Get or create the default shared assistant."""
+    global ASSISTANT_ID
+    if ASSISTANT_ID:
+        return ASSISTANT_ID
+
+    async def _create():
+        client = _get_client()
+        return await client.create_assistant(
+            name="shieldbot-default",
+            system_prompt="You are ShieldBot's shared memory layer.",
+        )
+
+    assistant = _run(_create())
+    ASSISTANT_ID = assistant.assistant_id
+    return ASSISTANT_ID
 
 
 # ── Per-user assistants ──
@@ -79,7 +97,7 @@ def create_thread(user_id: str | None = None) -> dict[str, Any]:
     if user_id:
         assistant_id = get_or_create_user_assistant(user_id)
     else:
-        assistant_id = ASSISTANT_ID
+        assistant_id = _get_default_assistant_id()
     return _run(_create_thread(assistant_id))
 
 
@@ -115,7 +133,7 @@ async def _list_memories(assistant_id: str) -> dict[str, Any]:
 
 
 def list_memories(user_id: str | None = None) -> dict[str, Any]:
-    assistant_id = _user_assistants.get(user_id or "", ASSISTANT_ID)
+    assistant_id = _user_assistants.get(user_id or "", "") or _get_default_assistant_id()
     return _run(_list_memories(assistant_id))
 
 
@@ -126,7 +144,7 @@ async def _add_memory_direct(assistant_id: str, content: str, metadata: dict | N
 
 
 def add_memory(content: str, metadata: dict | None = None, user_id: str | None = None) -> dict[str, Any]:
-    assistant_id = _user_assistants.get(user_id or "", ASSISTANT_ID)
+    assistant_id = _user_assistants.get(user_id or "", "") or _get_default_assistant_id()
     return _run(_add_memory_direct(assistant_id, content, metadata))
 
 
@@ -140,7 +158,7 @@ def get_thread(thread_id: str) -> dict[str, Any]:
 
 def list_threads(user_id: str | None = None) -> list[dict[str, Any]]:
     async def _list():
-        assistant_id = _user_assistants.get(user_id or "", ASSISTANT_ID)
+        assistant_id = _user_assistants.get(user_id or "", "") or _get_default_assistant_id()
         client = _get_client()
         result = await client.list_threads(assistant_id)
         return result if isinstance(result, list) else []

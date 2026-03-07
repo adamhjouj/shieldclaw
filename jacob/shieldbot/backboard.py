@@ -19,7 +19,8 @@ def is_connected() -> bool:
 
 
 def connection_status() -> str:
-    return f"CONNECTED → {backboard_client.BASE_URL} (assistant: {backboard_client.ASSISTANT_ID})"
+    from . import config
+    return f"CONNECTED → {config.BACKBOARD_BASE_URL} (assistant: {backboard_client.ASSISTANT_ID or 'auto'})"
 
 
 # ── Threads ──

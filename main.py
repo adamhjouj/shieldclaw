@@ -181,7 +181,7 @@ def build_action_request(
     payload_claims: dict,
 ) -> ActionRequest:
     """Build a ShieldBot ActionRequest from an HTTP proxy request."""
-    user_id = identity.get("agent_id") or identity.get("user_sub", "unknown")
+    user_id = identity.get("agent_id") or identity.get("sub", "unknown")
     session_id = payload_claims.get("sub", "unknown")
 
     path_parts = path.strip("/").split("/")
@@ -1122,8 +1122,9 @@ async def auth0_status():
         async with httpx.AsyncClient(timeout=5.0) as client:
             t0 = time.time()
             r = await client.get(
-                f"{_sc.BACKBOARD_BASE_URL}/health",
+                f"{_sc.BACKBOARD_BASE_URL}/assistants",
                 headers={"X-API-Key": _sc.BACKBOARD_API_KEY},
+                params={"limit": 1},
             )
             backboard_latency_ms = round((time.time() - t0) * 1000, 1)
             backboard_ok = r.status_code < 500
@@ -1290,8 +1291,8 @@ async def backboard_status():
     """No-auth: Backboard.io connection status and memory stats."""
     status = {
         "connected": backboard_client.is_configured(),
-        "base_url": backboard_client.BASE_URL,
-        "assistant_id": backboard_client.ASSISTANT_ID,
+        "base_url": shieldbot_config.BACKBOARD_BASE_URL,
+        "assistant_id": str(backboard_client.ASSISTANT_ID) if backboard_client.ASSISTANT_ID else "auto",
     }
     try:
         memories = backboard_client.list_memories()
@@ -1340,6 +1341,10 @@ class BackboardInterpreter:
         "list_files",
         "search_files",
         "chat_completions",
+        "send_email",
+        "read_email",
+        "search_email",
+        "list_inbox",
     })
     TOOL_TIMEOUT = 45
     DEFAULT_MEMORY_MODE = MemoryMode.AUTO
@@ -1355,9 +1360,16 @@ class BackboardInterpreter:
         "NEVER store raw chat history.\n"
         "2. TOOL DISPATCH — When the user's request requires Clawdbot/OpenClaw, "
         "use the execute_clawdbot_task tool with a clear task description.\n"
-        "3. CONTEXT — Use stored memories to personalise responses and tool "
+        "3. EMAIL — You can send and read emails via Gmail API. Available tools:\n"
+        "   - send_email: Send an email. Args: to (required), subject (required), "
+        "body (required), cc (optional), bcc (optional).\n"
+        "   - list_inbox: List recent inbox messages. Args: max_results (optional, default 10).\n"
+        "   - read_email: Read a specific email. Args: message_id (required).\n"
+        "   - search_email: Search emails. Args: query (required, Gmail search syntax), "
+        "max_results (optional, default 10).\n"
+        "4. CONTEXT — Use stored memories to personalise responses and tool "
         "selection.\n"
-        "4. SAFETY — Respect denied-tool lists. Never expose infrastructure "
+        "5. SAFETY — Respect denied-tool lists. Never expose infrastructure "
         "details to users.\n\n"
         "When you discover a user's operational preference, persist it as "
         "structured memory so it survives across sessions."
@@ -1415,6 +1427,86 @@ class BackboardInterpreter:
     def _db(self) -> sqlite3.Connection:
         return sqlite3.connect(self._db_path)
 
+    # ── Tool definitions for Backboard assistant ────────────────────────
+
+    LTM_TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "execute_clawdbot_task",
+                "description": "Execute a task via Clawdbot/OpenClaw.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task": {"type": "string", "description": "Task description for Clawdbot."},
+                    },
+                    "required": ["task"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_inbox",
+                "description": "List recent emails from the user's Gmail inbox.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "max_results": {"type": "integer", "description": "Number of emails to return (default 10)."},
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_email",
+                "description": "Read a specific email by message ID.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "message_id": {"type": "string", "description": "Gmail message ID."},
+                    },
+                    "required": ["message_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_email",
+                "description": "Search emails using Gmail search syntax.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Gmail search query (e.g. 'from:boss@example.com')."},
+                        "max_results": {"type": "integer", "description": "Number of results (default 10)."},
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "send_email",
+                "description": "Send an email via Gmail.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string", "description": "Recipient email address."},
+                        "subject": {"type": "string", "description": "Email subject line."},
+                        "body": {"type": "string", "description": "Email body text."},
+                        "cc": {"type": "string", "description": "CC recipients (optional)."},
+                        "bcc": {"type": "string", "description": "BCC recipients (optional)."},
+                    },
+                    "required": ["to", "subject", "body"],
+                },
+            },
+        },
+    ]
+
     # ── Assistant management ──────────────────────────────────────────────
 
     async def get_or_create_assistant(self) -> str:
@@ -1428,9 +1520,18 @@ class BackboardInterpreter:
                 for a in resp.json():
                     if a.get("name") == "shieldclaw-ltm":
                         self._assistant_id = a["assistant_id"]
+                        # Update tools + system prompt on existing assistant
+                        update_resp = await c.put(
+                            f"{self._base_url}/assistants/{self._assistant_id}",
+                            json={
+                                "system_prompt": self.LTM_SYSTEM_PROMPT,
+                                "tools": self.LTM_TOOLS,
+                            },
+                            headers=headers,
+                        )
                         logger.info(
-                            "[BackboardInterpreter] Reusing assistant %s",
-                            self._assistant_id,
+                            "[BackboardInterpreter] Reusing assistant %s (tools update: %s)",
+                            self._assistant_id, update_resp.status_code,
                         )
                         return self._assistant_id
 
@@ -1439,6 +1540,7 @@ class BackboardInterpreter:
                 json={
                     "name": "shieldclaw-ltm",
                     "system_prompt": self.LTM_SYSTEM_PROMPT,
+                    "tools": self.LTM_TOOLS,
                 },
                 headers=headers,
             )
@@ -1608,6 +1710,73 @@ class BackboardInterpreter:
 
         return calls
 
+    # ── Email tool helpers ────────────────────────────────────────────────
+
+    EMAIL_SCRIPT = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "openclaw", "skills", "email", "scripts", "email_agent.py",
+    )
+
+    async def _execute_email_tool(
+        self, tool_name: str, tool_args: dict,
+    ) -> dict:
+        """Run email_agent.py with the appropriate subcommand."""
+        cmd = ["python3", self.EMAIL_SCRIPT]
+
+        if tool_name == "send_email":
+            cmd += [
+                "send",
+                "--to", tool_args.get("to", ""),
+                "--subject", tool_args.get("subject", ""),
+                "--body", tool_args.get("body", ""),
+            ]
+            if tool_args.get("cc"):
+                cmd += ["--cc", tool_args["cc"]]
+            if tool_args.get("bcc"):
+                cmd += ["--bcc", tool_args["bcc"]]
+        elif tool_name == "list_inbox":
+            cmd += ["inbox", "--max-results", str(tool_args.get("max_results", 10))]
+        elif tool_name == "read_email":
+            cmd += ["read", "--message-id", tool_args.get("message_id", "")]
+        elif tool_name == "search_email":
+            cmd += [
+                "search",
+                "--query", tool_args.get("query", ""),
+                "--max-results", str(tool_args.get("max_results", 10)),
+            ]
+        else:
+            return {"error": f"Unknown email tool: {tool_name}", "status": "error"}
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=60,
+            )
+            if proc.returncode != 0:
+                return {
+                    "error": stderr.decode("utf-8", errors="replace").strip(),
+                    "status": "error",
+                }
+            output = stdout.decode("utf-8", errors="replace").strip()
+            try:
+                return {"result": json.loads(output), "status": "success"}
+            except json.JSONDecodeError:
+                return {"result": output, "status": "success"}
+        except asyncio.TimeoutError:
+            return {"error": "Email operation timed out", "status": "timeout"}
+        except Exception as exc:
+            return {"error": str(exc), "status": "error"}
+
+    # ── Main tool dispatcher ─────────────────────────────────────────────
+
+    EMAIL_TOOLS: frozenset[str] = frozenset({
+        "send_email", "read_email", "search_email", "list_inbox",
+    })
+
     async def execute_clawdbot_task(
         self, tool_name: str, tool_args: dict,
     ) -> dict:
@@ -1622,6 +1791,10 @@ class BackboardInterpreter:
             return {"error": "Invalid tool arguments", "status": "error"}
 
         logger.info("[BackboardInterpreter] Executing tool %s", tool_name)
+
+        # Email tools — execute directly via email_agent.py
+        if tool_name in self.EMAIL_TOOLS:
+            return await self._execute_email_tool(tool_name, tool_args)
 
         try:
             messages = tool_args.get("messages", [])
@@ -1723,6 +1896,58 @@ class BackboardInterpreter:
                 discord_user_id,
             )
 
+    # ── Activity logging for dashboard ───────────────────────────────────
+
+    def _log_activity(
+        self,
+        *,
+        user_id: str,
+        thread_id: str,
+        session_id: str,
+        action_type: str,
+        input_summary: str,
+        output_summary: str,
+        status: str = "approved",
+        risk_score: float = 0.0,
+        reason: str = "",
+        tools_used: list[str] | None = None,
+    ) -> None:
+        """Log an event to both the trace log and audit log so the dashboard picks it up."""
+        from jacob.shieldbot import backboard as _bb
+        from jacob.shieldbot.trace import build_decision_trace
+
+        trace = build_decision_trace(
+            thread_id=thread_id,
+            user_id=user_id,
+            session_id=session_id,
+            action_type=action_type,
+            input_summary=input_summary,
+            output_summary=output_summary,
+            risk_factors=tools_used or [],
+            risk_score=risk_score,
+            decision=status,
+            reason=reason,
+            trust_tier="ltm",
+        )
+        _bb.log_decision_trace(thread_id, session_id, trace)
+
+        # Also log to the audit log
+        from jacob.shieldbot.types import ActionRequest, Decision
+        req = ActionRequest(
+            user_id=user_id,
+            session_id=session_id,
+            action_type=action_type,
+            payload={"input_summary": input_summary},
+        )
+        dec = Decision(
+            status=status,
+            risk_score=risk_score,
+            reason=reason,
+            factors=tools_used or [],
+            thread_id=thread_id,
+        )
+        shieldbot_logger.log_decision(req, dec, trust_tier="ltm")
+
     # ── Main entry point ──────────────────────────────────────────────────
 
     async def process_message(
@@ -1738,6 +1963,7 @@ class BackboardInterpreter:
         thread_id = await self.get_or_create_thread(
             discord_user_id, discord_channel_id, guild_id,
         )
+        session_id = f"{discord_user_id}:{discord_channel_id}"
 
         # Enrich message with memory context when active
         enriched = user_message
@@ -1762,6 +1988,18 @@ class BackboardInterpreter:
             discord_user_id, discord_channel_id, memory_mode.value, thread_id,
         )
 
+        # Log the incoming message
+        self._log_activity(
+            user_id=discord_user_id,
+            thread_id=thread_id,
+            session_id=session_id,
+            action_type="ltm:message",
+            input_summary=user_message[:200],
+            output_summary="",
+            status="approved",
+            reason="User message received via BackboardInterpreter",
+        )
+
         # Send to Backboard
         response_data = await self.send_message_to_backboard(
             thread_id, enriched, memory_mode,
@@ -1769,6 +2007,7 @@ class BackboardInterpreter:
 
         # Tool-call loop
         iterations = 0
+        tools_used: list[str] = []
         while iterations < self.MAX_TOOL_ITERATIONS:
             tool_calls = self.handle_backboard_tool_calls(response_data)
             status = response_data.get("status", "").lower()
@@ -1778,6 +2017,7 @@ class BackboardInterpreter:
             iterations += 1
             tool_outputs: list[dict] = []
             for tc in tool_calls:
+                tools_used.append(tc["name"])
                 result = await self.execute_clawdbot_task(
                     tc["name"], tc["arguments"],
                 )
@@ -1785,6 +2025,21 @@ class BackboardInterpreter:
                     "tool_call_id": tc["id"],
                     "output": json.dumps(result, default=str),
                 })
+
+                # Log each tool execution
+                tool_status = result.get("status", "success")
+                self._log_activity(
+                    user_id=discord_user_id,
+                    thread_id=thread_id,
+                    session_id=session_id,
+                    action_type=f"ltm:tool:{tc['name']}",
+                    input_summary=json.dumps(tc["arguments"], default=str)[:200],
+                    output_summary=json.dumps(result, default=str)[:200],
+                    status="approved" if tool_status == "success" else "blocked",
+                    risk_score=0.0 if tool_status == "success" else 50.0,
+                    reason=f"Tool {tc['name']} → {tool_status}",
+                    tools_used=[tc["name"]],
+                )
 
             run_id = response_data.get("run_id", response_data.get("id", ""))
             response_data = await self.submit_tool_output_to_backboard(
@@ -1821,6 +2076,19 @@ class BackboardInterpreter:
                     "[BackboardInterpreter] OpenClaw fallback failed: %s", exc,
                 )
                 final_text = "I'm having trouble processing that right now."
+
+        # Log the final response
+        self._log_activity(
+            user_id=discord_user_id,
+            thread_id=thread_id,
+            session_id=session_id,
+            action_type="ltm:response",
+            input_summary=user_message[:200],
+            output_summary=final_text[:200],
+            status="approved",
+            reason=f"Response delivered ({len(tools_used)} tool(s) used)" if tools_used else "Direct response",
+            tools_used=tools_used,
+        )
 
         # Persist insights when memory is writable
         if memory_mode in (MemoryMode.AUTO, MemoryMode.FORCE):
@@ -2016,41 +2284,44 @@ async def proxy(request: Request, path: str):
             log_request(identity, token_scopes, request.method, request_path, 403)
             raise HTTPException(status_code=403, detail=fga_result.reason)
 
-    # --- ShieldBot Evaluation (agents only) ---
+    # --- ShieldBot Evaluation (agents + humans) ---
     body = await request.body()
+    action_req = build_action_request(identity, request.method, request_path, body, payload)
+    trust_tier = scopes_to_trust_tier(token_scopes) if identity["is_agent"] else "owner"
+
+    decision = await asyncio.to_thread(evaluate, action_req, trust_tier)
+
+    # Store decision in Backboard thread for this session
+    try:
+        session_id = payload.get("sub", "unknown")
+        user_id = identity.get("agent_id") or identity.get("sub", "unknown")
+        thread = shieldbot_backboard.get_or_create_thread(
+            user_id=user_id,
+            session_id=session_id,
+        )
+        shieldbot_backboard.append_thread_event(
+            thread_id=thread["thread_id"],
+            session_id=session_id,
+            event={
+                "event_type": "shieldbot_evaluation",
+                "identity_type": identity["identity_type"],
+                "method": request.method,
+                "path": request_path,
+                "action_type": action_req.action_type,
+                "status": decision.status,
+                "risk_score": decision.risk_score,
+                "reason": decision.reason,
+                "factors": decision.factors,
+                "trust_tier": trust_tier,
+                "agent_id": identity.get("agent_id"),
+                "agent_name": identity.get("agent_name"),
+            },
+        )
+    except Exception:
+        pass
+
+    # Blocking / approval enforcement only applies to agents
     if identity["is_agent"]:
-        action_req = build_action_request(identity, request.method, request_path, body, payload)
-        trust_tier = scopes_to_trust_tier(token_scopes)
-
-        decision = await asyncio.to_thread(evaluate, action_req, trust_tier)
-
-        # Store decision in Backboard thread for this session
-        try:
-            session_id = payload.get("sub", "unknown")
-            thread = shieldbot_backboard.get_or_create_thread(
-                user_id=identity.get("agent_id", "unknown"),
-                session_id=session_id,
-            )
-            shieldbot_backboard.append_thread_event(
-                thread_id=thread["thread_id"],
-                session_id=session_id,
-                event={
-                    "event_type": "shieldbot_evaluation",
-                    "method": request.method,
-                    "path": request_path,
-                    "action_type": action_req.action_type,
-                    "status": decision.status,
-                    "risk_score": decision.risk_score,
-                    "reason": decision.reason,
-                    "factors": decision.factors,
-                    "trust_tier": trust_tier,
-                    "agent_id": identity.get("agent_id"),
-                    "agent_name": identity.get("agent_name"),
-                },
-            )
-        except Exception:
-            pass
-
         async def _request_human_approval() -> bool:
             """Create a pending approval, wait up to 60s, return True if approved."""
             approval_id = str(uuid.uuid4())[:8].upper()

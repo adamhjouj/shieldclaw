@@ -24,7 +24,7 @@ EvalMode = Literal["think", "fast"]
 # Backboard unified API
 # ---------------------------------------------------------------------------
 BACKBOARD_BASE_URL = "https://app.backboard.io/api"
-BACKBOARD_API_KEY = "espr_JwYIxHoAqAcO9Y775yV5fxggdeNqUYRCapmc4bHb460"
+BACKBOARD_API_KEY = "espr_aD-mbx86g3moqVIN9pPVVB529fdpj1Qz2PP-ReI3q9A"
 
 # Model identifiers as routed through Backboard
 BACKBOARD_THINK_MODEL = "claude-sonnet-4-6"

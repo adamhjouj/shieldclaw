@@ -6,3 +6,6 @@ agent_registry.json
 
 # Per-agent FGA policy overrides (may contain internal path/resource names)
 fga_policy_agent_*.yaml
+gmail_credentials.json
+gmail_token.json
+.env

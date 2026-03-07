@@ -81,13 +81,44 @@ def authorize(creds: dict) -> str:
             except urllib.error.HTTPError:
                 pass  # Fall through to full auth flow
 
-    # Full OAuth2 flow — requires browser interaction
+    # Full OAuth2 flow — local HTTP server captures the redirect
+    import http.server
+    import threading
+    import webbrowser
+
+    redirect_port = 8095
+    redirect_uri = f"http://localhost:{redirect_port}"
+    auth_code_result: list[str] = []
+    auth_error: list[str] = []
+
+    class _OAuthHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            qs = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(qs)
+            code = params.get("code", [""])[0]
+            error = params.get("error", [""])[0]
+            if code:
+                auth_code_result.append(code)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"<html><body><h2>Authorization successful!</h2><p>You can close this tab.</p></body></html>")
+            else:
+                auth_error.append(error or "unknown error")
+                self.send_response(400)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(f"<html><body><h2>Authorization failed</h2><p>{error}</p></body></html>".encode())
+
+        def log_message(self, format, *args):
+            pass  # Suppress request logs
+
     auth_url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
         + urllib.parse.urlencode(
             {
                 "client_id": creds["client_id"],
-                "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
+                "redirect_uri": redirect_uri,
                 "response_type": "code",
                 "scope": " ".join(SCOPES),
                 "access_type": "offline",
@@ -95,10 +126,24 @@ def authorize(creds: dict) -> str:
             }
         )
     )
-    print("\nOpen this URL in your browser to authorize:\n", file=sys.stderr)
-    print(auth_url, file=sys.stderr)
-    print(file=sys.stderr)
-    code = input("Enter the authorization code: ").strip()
+
+    server = http.server.HTTPServer(("localhost", redirect_port), _OAuthHandler)
+    server.timeout = 120  # 2 minute timeout for user to authorize
+
+    print(f"\nOpening browser for Gmail authorization...", file=sys.stderr)
+    print(f"If the browser doesn't open, visit:\n{auth_url}\n", file=sys.stderr)
+    webbrowser.open(auth_url)
+
+    # Wait for the OAuth redirect callback
+    while not auth_code_result and not auth_error:
+        server.handle_request()
+    server.server_close()
+
+    if auth_error:
+        print(f"Authorization failed: {auth_error[0]}", file=sys.stderr)
+        sys.exit(1)
+
+    code = auth_code_result[0]
 
     token_resp = http_post_form(
         "https://oauth2.googleapis.com/token",
@@ -107,7 +152,7 @@ def authorize(creds: dict) -> str:
             "client_secret": creds["client_secret"],
             "code": code,
             "grant_type": "authorization_code",
-            "redirect_uri": "urn:ietf:wg:oauth:2.0:oob",
+            "redirect_uri": redirect_uri,
         },
     )
     save_token(token_resp)
