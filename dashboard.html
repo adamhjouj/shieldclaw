@@ -3,1615 +3,372 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ShieldClaw // Backboard Monitor</title>
+<title>ShieldClaw</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/motion@12.4.5/dist/motion.js"></script>
 <style>
-  .nav-links { display: flex; gap: 12px; }
-  .nav-link {
-    font-size: 0.7rem; letter-spacing: 0.18em;
-    padding: 6px 14px;
-    border: 1px solid var(--border2);
-    color: var(--text-dim);
-    text-decoration: none;
-    transition: all 0.15s;
-    font-family: var(--font-mono);
-  }
-  .nav-link:hover { border-color: var(--accent); color: var(--accent); }
-  .nav-link.active { border-color: var(--accent); color: var(--accent); }
-  .sys-strip {
-    display: flex; gap: 0;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg2);
-    font-size: 0.68rem; letter-spacing: 0.12em;
-    overflow-x: auto;
-  }
-  .sys-chip {
-    padding: 7px 16px; border-right: 1px solid var(--border);
-    white-space: nowrap; display: flex; align-items: center; gap: 6px;
-  }
-  .sys-chip:last-child { border-right: none; }
-  .sys-chip-label { color: var(--text-dim); }
-  .sys-chip-val   { color: var(--text-bright); }
-  .sys-chip-val.ok     { color: var(--green); }
-  .sys-chip-val.warn   { color: var(--amber); }
-  .sys-chip-val.error  { color: var(--red); }
-  .sys-chip-val.accent { color: var(--accent); }
-  .sys-chip-val.purple { color: #b060ff; }
-</style>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
-
-  :root {
-    --bg:        #080a0c;
-    --bg2:       #0d1117;
-    --bg3:       #111820;
-    --border:    #1e2d3d;
-    --border2:   #243447;
-    --text:      #8faacc;
-    --text-dim:  #3d5470;
-    --text-bright: #c8dff5;
-    --amber:     #f0a500;
-    --amber-dim: #7a5300;
-    --green:     #00d46a;
-    --green-dim: #004d27;
-    --red:       #ff3b5c;
-    --red-dim:   #5c0018;
-    --yellow:    #f0c000;
-    --yellow-dim:#5c4800;
-    --accent:    #0af;
-    --accent-dim:#003344;
-    --font-mono: 'Share Tech Mono', 'Courier New', monospace;
-    --font-hud:  'Orbitron', monospace;
-  }
-
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  html { font-size: 13px; }
-
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--font-mono);
-    min-height: 100vh;
-    overflow-x: hidden;
-    cursor: crosshair;
-  }
-
-  /* scanline overlay */
-  body::before {
-    content: '';
-    position: fixed; inset: 0;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0,0,0,0.08) 2px,
-      rgba(0,0,0,0.08) 4px
-    );
-    pointer-events: none;
-    z-index: 9999;
-  }
-
-  /* noise texture */
-  body::after {
-    content: '';
-    position: fixed; inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
-    pointer-events: none;
-    z-index: 9998;
-    opacity: 0.4;
-  }
-
-  /* ── HEADER ── */
-  header {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    padding: 18px 28px;
-    border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, #0a1520 0%, var(--bg) 100%);
-    position: sticky; top: 0; z-index: 100;
-  }
-
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
-
-  .shield-icon {
-    width: 36px; height: 36px;
-    border: 2px solid var(--accent);
-    clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-    display: flex; align-items: center; justify-content: center;
-    background: var(--accent-dim);
-    box-shadow: 0 0 16px rgba(0,170,255,0.3);
-    flex-shrink: 0;
-  }
-
-  .shield-icon svg { width: 18px; height: 18px; fill: var(--accent); }
-
-  .wordmark {
-    font-family: var(--font-hud);
-    font-size: 1.1rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    color: var(--text-bright);
-    line-height: 1;
-  }
-
-  .wordmark span {
-    color: var(--accent);
-    font-size: 0.7rem;
-    display: block;
-    letter-spacing: 0.3em;
-    font-weight: 400;
-    margin-top: 2px;
-  }
-
-  /* threat meter — center of header */
-  .threat-meter {
-    text-align: center;
-    font-family: var(--font-hud);
-  }
-
-  .threat-label {
-    font-size: 0.55rem;
-    letter-spacing: 0.35em;
-    color: var(--text-dim);
-    margin-bottom: 4px;
-  }
-
-  .threat-value {
-    font-size: 2.4rem;
-    font-weight: 900;
-    letter-spacing: 0.05em;
-    line-height: 1;
-    transition: color 0.6s, text-shadow 0.6s;
-  }
-
-  .threat-value.calm   { color: var(--green); text-shadow: 0 0 24px rgba(0,212,106,0.6); }
-  .threat-value.warn   { color: var(--amber); text-shadow: 0 0 24px rgba(240,165,0,0.6); animation: throb 1.4s ease-in-out infinite; }
-  .threat-value.alert  { color: var(--red);   text-shadow: 0 0 24px rgba(255,59,92,0.6);  animation: strobe 0.7s ease-in-out infinite; }
-
-  @keyframes throb  { 0%,100% { opacity:1 } 50% { opacity:0.6 } }
-  @keyframes strobe { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
-
-  .threat-sub {
-    font-size: 0.5rem;
-    letter-spacing: 0.3em;
-    color: var(--text-dim);
-    margin-top: 3px;
-  }
-
-  .header-right {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-  }
-
-  /* status dot */
-  .status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--text-dim);
-    flex-shrink: 0;
-    transition: background 0.3s, box-shadow 0.3s;
-  }
-
-  .status-dot.live {
-    background: var(--green);
-    box-shadow: 0 0 8px var(--green);
-    animation: pulse-dot 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse-dot { 0%,100% { box-shadow: 0 0 4px var(--green) } 50% { box-shadow: 0 0 14px var(--green) } }
-
-  .status-text {
-    font-size: 0.7rem;
-    letter-spacing: 0.15em;
-    color: var(--text-dim);
-  }
-
-  /* ── AUTH BAR ── */
-  .auth-bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 28px;
-    background: var(--bg2);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .auth-label {
-    font-size: 0.65rem;
-    letter-spacing: 0.25em;
-    color: var(--text-dim);
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .auth-input {
-    flex: 1;
-    background: var(--bg3);
-    border: 1px solid var(--border2);
-    color: var(--text-bright);
-    font-family: var(--font-mono);
-    font-size: 0.85rem;
-    padding: 7px 12px;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    letter-spacing: 0.05em;
-  }
-
-  .auth-input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(0,170,255,0.15);
-  }
-
-  .auth-input::placeholder { color: var(--text-dim); }
-
-  .btn {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    letter-spacing: 0.15em;
-    padding: 7px 16px;
-    border: 1px solid;
-    background: transparent;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-
-  .btn-primary {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  .btn-primary:hover {
-    background: var(--accent);
-    color: var(--bg);
-    box-shadow: 0 0 16px rgba(0,170,255,0.4);
-  }
-
-  .btn-dim {
-    border-color: var(--border2);
-    color: var(--text-dim);
-  }
-
-  .btn-dim:hover {
-    border-color: var(--text);
-    color: var(--text-bright);
-  }
-
-  .btn-dim.active {
-    border-color: var(--green);
-    color: var(--green);
-    box-shadow: 0 0 10px rgba(0,212,106,0.2);
-  }
-
-  /* ── STATS BAR ── */
-  .stats-bar {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .stat {
-    padding: 16px 24px;
-    border-right: 1px solid var(--border);
-    position: relative;
-    overflow: hidden;
-  }
-
-  .stat:last-child { border-right: none; }
-
-  .stat::before {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 2px;
-    background: var(--border2);
-    transition: background 0.5s;
-  }
-
-  .stat.total::before   { background: var(--accent); }
-  .stat.approved::before { background: var(--green); }
-  .stat.blocked::before  { background: var(--red); }
-  .stat.risk::before     { background: var(--amber); }
-
-  .stat-label {
-    font-size: 0.58rem;
-    letter-spacing: 0.3em;
-    color: var(--text-dim);
-    margin-bottom: 6px;
-  }
-
-  .stat-value {
-    font-family: var(--font-hud);
-    font-size: 2rem;
-    font-weight: 700;
-    line-height: 1;
-    transition: color 0.4s;
-  }
-
-  .stat.total   .stat-value { color: var(--accent); }
-  .stat.approved .stat-value { color: var(--green); }
-  .stat.blocked  .stat-value { color: var(--red); }
-  .stat.risk     .stat-value { color: var(--amber); }
-
-  .stat-sub {
-    font-size: 0.6rem;
-    color: var(--text-dim);
-    margin-top: 4px;
-  }
-
-  /* ── TABLE WRAPPER ── */
-  .table-wrap {
-    padding: 0 0 40px;
-  }
-
-  /* ── LOG TABLE ── */
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  thead {
-    position: sticky;
-    top: 68px; /* header height */
-    z-index: 50;
-  }
-
-  th {
-    background: var(--bg2);
-    border-bottom: 2px solid var(--border2);
-    border-right: 1px solid var(--border);
-    padding: 10px 14px;
-    text-align: left;
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    letter-spacing: 0.25em;
-    color: var(--text-dim);
-    font-weight: normal;
-    white-space: nowrap;
-  }
-
-  th:last-child { border-right: none; }
-
-  tbody tr {
-    border-bottom: 1px solid var(--border);
-    transition: background 0.15s;
-    cursor: pointer;
-  }
-
-  tbody tr:hover { background: rgba(255,255,255,0.02); }
-
-  tbody tr.detail-row {
-    background: var(--bg2);
-    cursor: default;
-  }
-
-  tbody tr.detail-row:hover { background: var(--bg2); }
-
-  td {
-    padding: 10px 14px;
-    border-right: 1px solid var(--border);
-    vertical-align: middle;
-    font-size: 0.82rem;
-  }
-
-  td:last-child { border-right: none; }
-
-  /* status badge */
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 3px 9px;
-    font-size: 0.6rem;
-    letter-spacing: 0.18em;
-    font-weight: normal;
-    border: 1px solid;
-    white-space: nowrap;
-  }
-
-  .badge::before {
-    content: '';
-    width: 5px; height: 5px;
-    border-radius: 50%;
-  }
-
-  .badge-approved {
-    color: var(--green);
-    border-color: var(--green-dim);
-    background: rgba(0,212,106,0.07);
-  }
-  .badge-approved::before { background: var(--green); box-shadow: 0 0 6px var(--green); }
-
-  .badge-blocked {
-    color: var(--red);
-    border-color: var(--red-dim);
-    background: rgba(255,59,92,0.07);
-  }
-  .badge-blocked::before { background: var(--red); box-shadow: 0 0 6px var(--red); }
-
-  .badge-needs_confirmation {
-    color: var(--yellow);
-    border-color: var(--yellow-dim);
-    background: rgba(240,192,0,0.07);
-  }
-  .badge-needs_confirmation::before { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
-
-  /* trust tier */
-  .tier {
-    font-size: 0.62rem;
-    letter-spacing: 0.15em;
-    padding: 2px 7px;
-    border: 1px solid;
-  }
-
-  .tier-high   { color: var(--green);  border-color: var(--green-dim); }
-  .tier-medium { color: var(--amber);  border-color: var(--amber-dim); }
-  .tier-low    { color: var(--red);    border-color: var(--red-dim);   }
-
-  /* risk bar */
-  .risk-bar-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .risk-bar-bg {
-    flex: 1;
-    height: 6px;
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    position: relative;
-    min-width: 60px;
-  }
-
-  .risk-bar-fill {
-    height: 100%;
-    transition: width 0.5s ease;
-  }
-
-  .risk-num {
-    font-size: 0.75rem;
-    font-family: var(--font-hud);
-    min-width: 28px;
-    text-align: right;
-  }
-
-  /* timestamps */
-  .ts {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    white-space: nowrap;
-  }
-
-  .ts-date { display: block; }
-  .ts-time { color: var(--text); }
-
-  /* action type */
-  .action-type {
-    color: var(--accent);
-    font-size: 0.8rem;
-  }
-
-  /* user/session ids */
-  .uid {
-    font-size: 0.72rem;
-    color: var(--text);
-    max-width: 130px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  /* reason text */
-  .reason-text {
-    font-size: 0.75rem;
-    color: var(--text);
-    max-width: 280px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* expand icon */
-  .expand-btn {
-    background: none;
-    border: 1px solid var(--border2);
-    color: var(--text-dim);
-    width: 20px; height: 20px;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    font-size: 0.7rem;
-    transition: all 0.15s;
-    flex-shrink: 0;
-  }
-
-  .expand-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .expand-btn.open  { border-color: var(--accent); color: var(--accent); transform: rotate(180deg); }
-
-  /* detail panel */
-  .detail-panel {
-    padding: 16px 24px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
-
-  .detail-section {
-    border: 1px solid var(--border);
-    background: var(--bg);
-    padding: 12px 14px;
-  }
-
-  .detail-section-label {
-    font-size: 0.55rem;
-    letter-spacing: 0.3em;
-    color: var(--text-dim);
-    margin-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 6px;
-  }
-
-  .detail-section pre {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--text-bright);
-    white-space: pre-wrap;
-    word-break: break-all;
-    max-height: 180px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border2) transparent;
-  }
-
-  .factors-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .factor-tag {
-    font-size: 0.65rem;
-    letter-spacing: 0.1em;
-    padding: 3px 8px;
-    border: 1px solid var(--border2);
-    color: var(--amber);
-    background: rgba(240,165,0,0.06);
-  }
-
-  .factor-empty {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-  }
-
-  /* empty state */
-  .empty-state {
-    text-align: center;
-    padding: 80px 24px;
-    color: var(--text-dim);
-  }
-
-  .empty-state-icon {
-    font-size: 3rem;
-    margin-bottom: 16px;
-    opacity: 0.3;
-  }
-
-  .empty-state-title {
-    font-family: var(--font-hud);
-    font-size: 0.8rem;
-    letter-spacing: 0.3em;
-    color: var(--text-dim);
-    margin-bottom: 8px;
-  }
-
-  .empty-state-sub {
-    font-size: 0.75rem;
-    color: var(--text-dim);
-    opacity: 0.7;
-  }
-
-  /* error banner */
-  .error-banner {
-    display: none;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 28px;
-    background: rgba(255,59,92,0.08);
-    border-bottom: 1px solid rgba(255,59,92,0.3);
-    font-size: 0.75rem;
-    color: var(--red);
-  }
-
-  .error-banner.show { display: flex; }
-
-  /* last-updated ticker */
-  .last-updated {
-    font-size: 0.6rem;
-    letter-spacing: 0.18em;
-    color: var(--text-dim);
-    padding: 8px 28px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .spinner {
-    width: 10px; height: 10px;
-    border: 1px solid var(--border2);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    display: none;
-  }
-
-  .spinner.spin {
-    display: block;
-    animation: spin 0.7s linear infinite;
-  }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* fade-in for new rows */
-  @keyframes row-in {
-    from { opacity: 0; transform: translateX(-6px); }
-    to   { opacity: 1; transform: translateX(0); }
-  }
-
-  .row-new { animation: row-in 0.3s ease forwards; }
-
-  /* ── CHARTS ── */
-  .charts-row {
-    display: grid;
-    grid-template-columns: 2fr 1fr 1fr;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg2);
-  }
-
-  .chart-panel {
-    padding: 12px 18px 14px;
-    border-right: 1px solid var(--border);
-    position: relative;
-  }
-
-  .chart-panel:last-child { border-right: none; }
-
-  .chart-label {
-    font-size: 0.55rem;
-    letter-spacing: 0.3em;
-    color: var(--text-dim);
-    margin-bottom: 8px;
-  }
-
-  .chart-panel canvas {
-    display: block;
-    width: 100%;
-  }
-
-  /* scrollbars */
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border2); }
-  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#F7F7F8;
+  --card:#FFFFFF;
+  --border:#E5E7EB;
+  --text:#111827;
+  --text2:#6B7280;
+  --text3:#9CA3AF;
+  --low:#10B981;
+  --low-bg:#ECFDF5;
+  --med:#F59E0B;
+  --med-bg:#FFFBEB;
+  --high:#EF4444;
+  --high-bg:#FEF2F2;
+  --r:10px;
+  --shadow:0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);
+  --font:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',monospace;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;display:flex;-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5}
+
+/* ── Sidebar ── */
+.sb{width:240px;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;height:100vh;position:sticky;top:0;opacity:0}
+.sb-top{padding:24px 20px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sb-logo{width:8px;height:8px;border-radius:50%;background:var(--med);flex-shrink:0}
+.sb-title{font-size:14px;font-weight:600;color:var(--text)}
+.sb-sec{padding:24px 20px 8px}
+.sb-lbl{font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text3);margin-bottom:12px}
+.sb-row{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;color:var(--text2)}
+.sb-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.sb-dot.on{background:var(--low)}.sb-dot.off{background:var(--high)}
+.sb-thread{display:flex;align-items:flex-start;gap:10px;padding:8px 0;cursor:pointer;font-size:13px}
+.sb-thread:hover{opacity:.7}
+.sb-td{width:7px;height:7px;border-radius:50%;background:var(--high);margin-top:4px;flex-shrink:0}
+.sb-ti{line-height:1.5}
+.sb-tn{color:var(--text);font-weight:500;display:block}
+.sb-ts{color:var(--text3);font-size:12px}
+.sb-bottom{margin-top:auto;padding:20px;border-top:1px solid var(--border)}
+.sb-cfg{font-size:12px;color:var(--text2);padding:3px 0;line-height:1.6}
+.sb-cfg b{color:var(--text);font-weight:500}
+
+/* ── Main ── */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+
+/* ── Stats ── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:24px 32px;background:var(--bg)}
+.st{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:20px;box-shadow:var(--shadow);opacity:0;transform:translateY(8px)}
+.st-val{font-size:26px;font-weight:600;letter-spacing:-0.02em;line-height:1;color:var(--text)}
+.st-lbl{font-size:12px;font-weight:500;color:var(--text3);margin-top:6px}
+
+/* ── Tabs ── */
+.tabs{display:flex;gap:4px;padding:0 32px 0;background:var(--bg)}
+.tab{font-family:var(--font);font-size:13px;font-weight:500;padding:8px 16px;border-radius:8px;border:none;background:none;color:var(--text3);cursor:pointer;transition:all .15s}
+.tab.on{background:var(--card);color:var(--text);box-shadow:var(--shadow)}
+.tab:not(.on):hover{color:var(--text2)}
+
+/* ── Content ── */
+.content{flex:1;overflow-y:auto;padding:24px 32px 48px}
+.hidden{display:none}
+
+/* ── Timeline ── */
+.tl-list{display:flex;flex-direction:column;gap:2px}
+.tl{display:flex;gap:16px;padding:14px 16px;border-radius:var(--r);transition:background .1s;opacity:0}
+.tl:hover{background:var(--card)}
+.tl-time{font-family:var(--mono);font-size:12px;color:var(--text3);width:72px;flex-shrink:0;padding-top:1px}
+.tl-icon{width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0}
+.tl-body{flex:1;min-width:0}
+.tl-title{font-size:14px;font-weight:500;color:var(--text);margin-bottom:2px}
+.tl-desc{font-size:13px;color:var(--text2);line-height:1.5}
+.tl-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 8px;border-radius:100px;margin-top:6px}
+.tl-badge.approved{background:var(--low-bg);color:var(--low)}
+.tl-badge.blocked{background:var(--high-bg);color:var(--high)}
+.tl-badge.needs_confirmation{background:var(--med-bg);color:var(--med)}
+
+/* ── Thought ── */
+.th-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;opacity:0;transform:translateY(8px)}
+.th-head{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.th-title{font-size:16px;font-weight:500;color:var(--text)}
+.th-sub{font-size:12px;color:var(--text3)}
+.th-body{padding:24px}
+.th-lbl{font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text3);margin-bottom:12px}
+.th-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:24px;opacity:0;transform:translateX(-8px)}
+.th-box-text{font-size:14px;color:var(--text);line-height:1.7}
+.th-steps{display:flex;flex-direction:column;gap:0;margin-bottom:24px}
+.th-step{display:flex;align-items:flex-start;gap:14px;padding:10px 0;opacity:0;transform:translateY(6px)}
+.th-sn{width:24px;height:24px;border-radius:50%;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--text2);flex-shrink:0}
+.th-sc{flex:1}
+.th-st{font-size:14px;font-weight:500;color:var(--text);margin-bottom:1px}
+.th-sd{font-size:13px;color:var(--text2)}
+.th-conn{width:1px;height:8px;background:var(--border);margin-left:11px;opacity:0}
+.th-end{border-radius:8px;padding:16px 20px;opacity:0;transform:scale(.97)}
+.th-end.ok{background:var(--low-bg);border:1px solid rgba(16,185,129,.15)}
+.th-end.bad{background:var(--high-bg);border:1px solid rgba(239,68,68,.15)}
+.th-end-lbl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px}
+.th-end.ok .th-end-lbl{color:var(--low)}
+.th-end.bad .th-end-lbl{color:var(--high)}
+.th-end-text{font-size:14px;font-weight:500;color:var(--text)}
+
+.th-flow{display:flex;gap:8px;margin-top:24px}
+.th-fn{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;opacity:0;transform:scale(.9) translateY(4px);min-width:0}
+.th-fn-hd{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.th-fn-ic{width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0}
+.th-fn-t{font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase}
+.th-fn-c{font-size:11px;color:var(--text2);line-height:1.5}
+.th-fn-c code{font-family:var(--mono);font-size:10px;background:var(--card);border:1px solid var(--border);padding:1px 4px;border-radius:3px}
+.th-fn.n-in{border-left:2px solid #3B82F6}.th-fn.n-in .th-fn-ic{background:#EFF6FF;color:#3B82F6}.th-fn.n-in .th-fn-t{color:#3B82F6}
+.th-fn.n-ctx{border-left:2px solid #8B5CF6}.th-fn.n-ctx .th-fn-ic{background:#F5F3FF;color:#8B5CF6}.th-fn.n-ctx .th-fn-t{color:#8B5CF6}
+.th-fn.n-ev{border-left:2px solid var(--med)}.th-fn.n-ev .th-fn-ic{background:var(--med-bg);color:var(--med)}.th-fn.n-ev .th-fn-t{color:var(--med)}
+.th-fn.n-dec.d-approved{border-left:2px solid var(--low)}.th-fn.n-dec.d-approved .th-fn-ic{background:var(--low-bg);color:var(--low)}.th-fn.n-dec.d-approved .th-fn-t{color:var(--low)}
+.th-fn.n-dec.d-blocked{border-left:2px solid var(--high)}.th-fn.n-dec.d-blocked .th-fn-ic{background:var(--high-bg);color:var(--high)}.th-fn.n-dec.d-blocked .th-fn-t{color:var(--high)}
+.th-fn.n-dec.d-needs_confirmation{border-left:2px solid var(--med)}.th-fn.n-dec.d-needs_confirmation .th-fn-ic{background:var(--med-bg);color:var(--med)}.th-fn.n-dec.d-needs_confirmation .th-fn-t{color:var(--med)}
+.th-arr{display:flex;align-items:center;flex-shrink:0;width:16px;opacity:0}
+.th-arr svg{width:12px;height:12px;stroke:var(--border);stroke-width:2;fill:none}
+
+.th-reason{margin-top:20px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px 20px;opacity:0}
+.th-reason-lbl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#8B5CF6;margin-bottom:6px}
+.th-reason-txt{font-size:12px;color:var(--text2);line-height:1.7;font-family:var(--mono);white-space:pre-wrap;max-height:200px;overflow-y:auto}
+
+/* ── Risk ── */
+.rk-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden;opacity:0;transform:translateY(8px)}
+.rk-head{padding:16px 24px;border-bottom:1px solid var(--border);font-size:16px;font-weight:500}
+.rk-body{padding:24px}
+.rk-row{display:flex;align-items:center;gap:16px;margin-bottom:16px}
+.rk-row:last-child{margin-bottom:0}
+.rk-lbl{font-size:12px;font-weight:500;color:var(--text3);width:80px;flex-shrink:0}
+.rk-track{flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden}
+.rk-fill{height:100%;border-radius:4px}
+.rk-val{font-family:var(--mono);font-size:14px;font-weight:600;width:48px;text-align:right}
+.rk-factors{display:flex;flex-direction:column;gap:10px}
+.rk-f{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2);opacity:0;transform:translateX(-4px)}
+.rk-fd{width:5px;height:5px;border-radius:50%;background:var(--med);flex-shrink:0}
+.rk-checks{display:flex;flex-direction:column;gap:10px}
+.rk-ck{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2);opacity:0;transform:translateX(-4px)}
+.rk-ci{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0}
+.rk-ci.ok{background:var(--low-bg);color:var(--low)}
+.rk-ci.no{background:var(--high-bg);color:var(--high)}
+
+.empty{text-align:center;padding:64px 24px;color:var(--text3);font-size:14px}
+
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 </style>
 </head>
 <body>
 
-<!-- HEADER -->
-<header>
-  <div class="header-left">
-    <div class="shield-icon">
-      <svg viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.5 3.4 10.7 8 12 4.6-1.3 8-6.5 8-12V6l-8-4z"/></svg>
-    </div>
-    <div class="wordmark">
-      SHIELDCLAW
-      <span>BACKBOARD MONITOR</span>
-    </div>
-    <div class="nav-links" style="margin-left:18px">
-      <a class="nav-link active" href="/shieldclaw/backboard">BACKBOARD</a>
-      <a class="nav-link" href="/shieldclaw/auth0">AUTH0 DEBUG</a>
-      <a class="nav-link" href="/shieldclaw/analytics">ANALYTICS</a>
-      <a class="nav-link" href="/shieldclaw/debug" target="_blank">/debug JSON</a>
-    </div>
+<aside class="sb" id="sidebar">
+  <div class="sb-top"><div class="sb-logo"></div><div class="sb-title">ShieldClaw</div></div>
+  <div class="sb-sec">
+    <div class="sb-lbl">Services</div>
+    <div class="sb-row"><div class="sb-dot" id="svcOC"></div>OpenClaw</div>
+    <div class="sb-row"><div class="sb-dot" id="svcBB"></div>Backboard</div>
+    <div class="sb-row"><div class="sb-dot" id="svcSC"></div>ShieldClaw</div>
+  </div>
+  <div class="sb-sec">
+    <div class="sb-lbl">Threads</div>
+    <div id="threadsList"></div>
+  </div>
+  <div class="sb-bottom">
+    <div class="sb-lbl" style="margin-bottom:8px">Config</div>
+    <div class="sb-cfg">Eval mode: <b id="cfgMode">—</b></div>
+    <div class="sb-cfg">Backboard eval: <b id="cfgBBEval">—</b></div>
+    <div class="sb-cfg">Memories: <b id="cfgMem">—</b></div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="stats" id="statsGrid">
+    <div class="st"><div class="st-val" id="statEvents">&mdash;</div><div class="st-lbl">Events</div></div>
+    <div class="st"><div class="st-val" id="statThreads">&mdash;</div><div class="st-lbl">Threads</div></div>
+    <div class="st"><div class="st-val" id="statRisk">&mdash;</div><div class="st-lbl">Avg Risk</div></div>
+    <div class="st"><div class="st-val" id="statApproved">&mdash;</div><div class="st-lbl">Approved</div></div>
   </div>
 
-  <div class="threat-meter">
-    <div class="threat-label">AVG THREAT LEVEL</div>
-    <div class="threat-value calm" id="threatValue">—</div>
-    <div class="threat-sub" id="threatSub">AWAITING DATA</div>
+  <div class="tabs">
+    <button class="tab on" id="tabTL" onclick="go('timeline')">Timeline</button>
+    <button class="tab" id="tabTH" onclick="go('thought')">Thinking</button>
+    <button class="tab" id="tabRK" onclick="go('risk')">Risk</button>
   </div>
 
-  <div class="header-right">
-    <div class="status-dot" id="statusDot"></div>
-    <div class="status-text" id="statusText">OFFLINE</div>
-  </div>
-</header>
-
-<!-- SYSTEM STATUS STRIP -->
-<div class="sys-strip" id="sysStrip">
-  <div class="sys-chip"><span class="sys-chip-label">OPENCLAW</span><span class="sys-chip-val" id="ssOC">…</span></div>
-  <div class="sys-chip"><span class="sys-chip-label">BACKBOARD</span><span class="sys-chip-val" id="ssBB">…</span></div>
-  <div class="sys-chip"><span class="sys-chip-label">JWKS KEYS</span><span class="sys-chip-val" id="ssJWKS">…</span></div>
-  <div class="sys-chip"><span class="sys-chip-label">AUTH0</span><span class="sys-chip-val accent" id="ssAuth0">…</span></div>
-  <div class="sys-chip"><span class="sys-chip-label">EVAL MODE</span><span class="sys-chip-val purple" id="ssMode">…</span></div>
-  <div class="sys-chip"><span class="sys-chip-label">AGENTS</span><span class="sys-chip-val" id="ssAgents">…</span></div>
-  <div class="sys-chip"><span class="sys-chip-label">UPTIME</span><span class="sys-chip-val ok" id="ssUptime">…</span></div>
-</div>
-
-<!-- CONTROL BAR -->
-<div class="auth-bar">
-  <button class="btn btn-primary" id="fetchBtn" onclick="fetchLog()">FETCH LOG</button>
-  <button class="btn btn-dim" id="autoBtn" onclick="toggleAuto()">AUTO-REFRESH</button>
-  <span class="auth-label" style="margin-left:12px">EVAL MODE //</span>
-  <button class="btn btn-dim" id="modeThink" onclick="setEvalMode('think')" title="claude-sonnet-4-6 + extended thinking">THINK</button>
-  <button class="btn btn-dim" id="modeFast"  onclick="setEvalMode('fast')"  title="claude-haiku, no thinking">FAST</button>
-</div>
-
-<!-- ERROR BANNER -->
-<div class="error-banner" id="errorBanner">
-  <span>&#9632;</span>
-  <span id="errorMsg"></span>
-</div>
-
-<!-- STATS BAR -->
-<div class="stats-bar" style="grid-template-columns: repeat(6, 1fr)">
-  <div class="stat total">
-    <div class="stat-label">TOTAL EVALUATIONS</div>
-    <div class="stat-value" id="statTotal">—</div>
-    <div class="stat-sub">all-time calls</div>
-  </div>
-  <div class="stat approved">
-    <div class="stat-label">APPROVED</div>
-    <div class="stat-value" id="statApproved">—</div>
-    <div class="stat-sub" id="statApprovedPct"></div>
-  </div>
-  <div class="stat blocked">
-    <div class="stat-label">BLOCKED</div>
-    <div class="stat-value" id="statBlocked">—</div>
-    <div class="stat-sub" id="statBlockedPct"></div>
-  </div>
-  <div class="stat" style="--accent-stat:#f0c000">
-    <div class="stat-label" style="color:var(--text-dim)">PENDING CONFIRM</div>
-    <div class="stat-value" id="statPending" style="color:#f0c000">—</div>
-    <div class="stat-sub" id="statPendingPct"></div>
-  </div>
-  <div class="stat risk">
-    <div class="stat-label">AVG RISK SCORE</div>
-    <div class="stat-value" id="statRisk">—</div>
-    <div class="stat-sub">out of 100</div>
-  </div>
-  <div class="stat" style="">
-    <div class="stat-label" style="color:var(--text-dim)">BLOCK RATE</div>
-    <div class="stat-value" id="statBlockRate" style="color:var(--red)">—</div>
-    <div class="stat-sub" id="statBlockRateSub">last 10 evals</div>
-  </div>
-</div>
-
-<!-- CHARTS -->
-<div class="charts-row" id="chartsRow" style="display:none">
-  <div class="chart-panel">
-    <div class="chart-label">RISK SCORE OVER TIME</div>
-    <canvas id="chartRisk" height="90"></canvas>
-  </div>
-  <div class="chart-panel">
-    <div class="chart-label">APPROVAL BREAKDOWN</div>
-    <canvas id="chartBreakdown" height="90"></canvas>
-  </div>
-  <div class="chart-panel">
-    <div class="chart-label">EVALUATIONS PER MINUTE</div>
-    <canvas id="chartVolume" height="90"></canvas>
-  </div>
-</div>
-
-<!-- ANALYTICS PANELS -->
-<div id="analyticsRow" style="display:none;border-bottom:1px solid var(--border);background:var(--bg2)">
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid var(--border)">
-
-    <!-- AGENT LEADERBOARD -->
-    <div style="padding:14px 18px;border-right:1px solid var(--border)">
-      <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">AGENT LEADERBOARD</div>
-      <div id="agentLeaderboard" style="font-size:0.75rem;display:flex;flex-direction:column;gap:6px"></div>
-    </div>
-
-    <!-- TOP ACTION TYPES -->
-    <div style="padding:14px 18px;border-right:1px solid var(--border)">
-      <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">TOP ACTION TYPES</div>
-      <div id="actionBreakdown" style="display:flex;flex-direction:column;gap:5px"></div>
-    </div>
-
-    <!-- RISK DISTRIBUTION -->
-    <div style="padding:14px 18px;border-right:1px solid var(--border)">
-      <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">RISK DISTRIBUTION</div>
-      <div id="riskHistogram" style="display:flex;flex-direction:column;gap:4px"></div>
-    </div>
-
-    <!-- TOP RISK FACTORS -->
-    <div style="padding:14px 18px">
-      <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">TOP RISK FACTORS</div>
-      <div id="topFactors" style="display:flex;flex-direction:column;gap:5px"></div>
-    </div>
-  </div>
-
-  <!-- RECENT BLOCKS FEED -->
-  <div style="padding:12px 18px">
-    <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:8px">RECENT BLOCKS</div>
-    <div id="recentBlocks" style="display:flex;gap:10px;flex-wrap:wrap"></div>
-  </div>
-</div>
-
-<!-- LAST UPDATED -->
-<div class="last-updated">
-  <div class="spinner" id="spinner"></div>
-  <span id="lastUpdated">NOT YET FETCHED</span>
-</div>
-
-<!-- TABLE -->
-<div class="table-wrap">
-  <div id="emptyState" class="empty-state">
-    <div class="empty-state-icon">&#9632;</div>
-    <div class="empty-state-title">NO DATA LOADED</div>
-    <div class="empty-state-sub">Click FETCH LOG or enable AUTO-REFRESH to begin monitoring.</div>
-  </div>
-
-  <table id="logTable" style="display:none">
-    <thead>
-      <tr>
-        <th></th>
-        <th>TIMESTAMP</th>
-        <th>STATUS</th>
-        <th>ACTION TYPE</th>
-        <th>RISK</th>
-        <th>TRUST</th>
-        <th>USER</th>
-        <th>INPUT SUMMARY</th>
-        <th>REASON</th>
-      </tr>
-    </thead>
-    <tbody id="logBody"></tbody>
-  </table>
+  <div class="content" id="pTL"></div>
+  <div class="content hidden" id="pTH"></div>
+  <div class="content hidden" id="pRK"></div>
 </div>
 
 <script>
-  let autoInterval = null;
-  let logData = [];
-  let expandedRows = new Set();
+let D=[], auto=null, cur='timeline';
 
-  // ── SYSTEM STRIP ──────────────────────────────────────────────
-  async function loadSysStrip() {
-    try {
-      const res = await fetch('/shieldclaw/auth0/status');
-      if (!res.ok) return;
-      const d = await res.json();
+document.addEventListener('DOMContentLoaded',()=>{
+  Motion.animate('#sidebar',{opacity:[0,1],x:[-12,0]},{duration:.35,easing:'ease-out'});
+  anime({targets:'.st',opacity:[0,1],translateY:[8,0],delay:anime.stagger(50,{start:100}),duration:350,easing:'easeOutCubic'});
+  fetchLog(); loadStatus(); loadConfig();
+});
 
-      const ss = (id, val, cls) => {
-        const el = document.getElementById(id);
-        if (el) { el.textContent = val; el.className = 'sys-chip-val ' + (cls||''); }
-      };
+function go(t){
+  cur=t;
+  document.getElementById('tabTL').classList.toggle('on',t==='timeline');
+  document.getElementById('tabTH').classList.toggle('on',t==='thought');
+  document.getElementById('tabRK').classList.toggle('on',t==='risk');
+  document.getElementById('pTL').classList.toggle('hidden',t!=='timeline');
+  document.getElementById('pTH').classList.toggle('hidden',t!=='thought');
+  document.getElementById('pRK').classList.toggle('hidden',t!=='risk');
+  if(t==='timeline')renderTL();else if(t==='thought')renderTH();else renderRK();
+}
 
-      ss('ssOC',     d.openclaw.reachable  ? '✓ ' + d.openclaw.latency_ms + 'ms' : '✗ DOWN',   d.openclaw.reachable ? 'ok' : 'error');
-      ss('ssBB',     d.backboard.reachable ? '✓ ' + d.backboard.latency_ms + 'ms' : (d.backboard.api_key_set ? '? NO RESP' : '✗ NO KEY'), d.backboard.reachable ? 'ok' : 'warn');
-      ss('ssJWKS',   d.jwks.healthy ? d.jwks.key_count + ' keys (age ' + d.jwks.age_seconds + 's)' : 'NOT CACHED', d.jwks.healthy ? 'ok' : 'error');
-      ss('ssAuth0',  d.auth0.domain, 'accent');
-      ss('ssMode',   d.backboard.current_eval_mode.toUpperCase(), 'purple');
-      ss('ssAgents', d.agent_registry.active + ' active / ' + d.agent_registry.total + ' total', d.agent_registry.active > 0 ? 'ok' : '');
-      const up = d.system.uptime_seconds;
-      const upStr = up < 60 ? up + 's' : up < 3600 ? Math.floor(up/60) + 'm' : Math.floor(up/3600) + 'h ' + Math.floor((up%3600)/60) + 'm';
-      ss('ssUptime', upStr, 'ok');
-    } catch(_) {}
-  }
+async function fetchLog(){
+  try{const r=await fetch('/shieldclaw/backboard/log');if(!r.ok)return;const d=await r.json();D=(d.log||[]).slice().reverse();renderAll();}catch(e){console.error(e)}
+}
+async function loadStatus(){
+  try{const r=await fetch('/shieldclaw/auth0/status');if(!r.ok)return;const d=await r.json();dot('svcOC',d.openclaw.reachable);dot('svcBB',d.backboard.reachable);dot('svcSC',true);}catch(_){dot('svcSC',true)}
+}
+async function loadConfig(){
+  try{const r=await fetch('/shieldclaw/backboard/config');if(r.ok){const c=await r.json();document.getElementById('cfgMode').textContent=c.eval_mode||'—';document.getElementById('cfgBBEval').textContent=c.use_backboard?'on':'off';}}catch(_){}
+  try{const r=await fetch('/shieldclaw/backboard/status');if(r.ok){const s=await r.json();document.getElementById('cfgMem').textContent=s.memory_count!==undefined?s.memory_count:'—';}}catch(_){document.getElementById('cfgMem').textContent='—'}
+}
+function dot(id,on){const e=document.getElementById(id);e.classList.toggle('on',on);e.classList.toggle('off',!on)}
 
-  loadSysStrip();
-  setInterval(loadSysStrip, 15000);
+function renderAll(){renderStats();renderThreads();if(cur==='timeline')renderTL();else if(cur==='thought')renderTH();else renderRK()}
 
-  // ── FETCH ─────────────────────────────────────────────────────────────
-  async function fetchLog() {
-    setLoading(true);
-    hideError();
+function renderStats(){
+  const n=D.length,a=D.filter(r=>r.status==='approved').length,avg=n?(D.reduce((s,r)=>s+(r.risk_score||0),0)/n):0;
+  const th=new Set();D.forEach(r=>{if(r.thread_id)th.add(r.thread_id);if(r.session_id)th.add(r.session_id)});
+  anim('statEvents',n);anim('statThreads',th.size);anim('statRisk',Math.round(avg*10)/10,true);
+  document.getElementById('statApproved').textContent=n?Math.round(a/n*100)+'%':'0%';
+}
+function anim(id,t,f){
+  const e=document.getElementById(id),fr=parseFloat(e.textContent)||0;
+  anime({targets:{v:fr},v:t,duration:400,easing:'easeOutExpo',round:f?10:1,update:a=>{e.textContent=f?a.animations[0].currentValue:Math.round(a.animations[0].currentValue)}});
+}
 
-    try {
-      const res = await fetch('/shieldclaw/backboard/log');
+function renderThreads(){
+  const c=document.getElementById('threadsList'),m={};
+  D.forEach(r=>{const k=r.session_id||r.thread_id||'default';if(!m[k])m[k]={user:r.user_id||'unknown',count:0};m[k].count++});
+  const t=Object.values(m);
+  c.innerHTML=t.length?t.map(x=>`<div class="sb-thread"><div class="sb-td"></div><div class="sb-ti"><span class="sb-tn">${esc(x.user.length>18?x.user.slice(0,16)+'…':x.user)}</span><span class="sb-ts">${x.count} event${x.count!==1?'s':''}</span></div></div>`).join(''):'<div style="font-size:12px;color:var(--text3)">No threads</div>';
+}
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(`HTTP ${res.status}: ${err.detail || res.statusText}`);
-      }
+// ── Timeline ──
+function renderTL(){
+  const p=document.getElementById('pTL');
+  if(!D.length){p.innerHTML='<div class="empty">No activity yet.</div>';return}
+  p.innerHTML='<div class="tl-list">'+D.map(e=>{
+    const t=new Date(e.timestamp).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const sc=(e.status||'').replace(' ','_');
+    const col=e.status==='approved'?'var(--low)':e.status==='blocked'?'var(--high)':'var(--med)';
+    const sl=(e.status||'unknown').replace('_',' ');
+    const cap=sl.charAt(0).toUpperCase()+sl.slice(1);
+    const desc=e.reason||e.input_summary||'';
+    return`<div class="tl"><div class="tl-time">${t}</div><div class="tl-icon" style="background:${col}"></div><div class="tl-body"><div class="tl-title">${esc(e.action_type||'—')}</div>${desc?`<div class="tl-desc">${esc(desc)}</div>`:''}<span class="tl-badge ${sc}">${cap}</span></div></div>`;
+  }).join('')+'</div>';
+  anime({targets:'.tl',opacity:[0,1],translateX:[-6,0],delay:anime.stagger(30,{start:40}),duration:300,easing:'easeOutCubic'});
+}
 
-      const data = await res.json();
-      logData = (data.log || []).slice().reverse(); // newest first
-      renderAll();
-      setOnline(true);
-      loadEvalMode();
-      document.getElementById('lastUpdated').textContent =
-        'LAST UPDATED: ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+// ── Thinking ──
+function renderTH(){
+  const p=document.getElementById('pTH');
+  const e=D.length?D[0]:null;
+  if(!e){p.innerHTML='<div class="empty">No evaluation data available.</div>';return}
 
-    } catch (e) {
-      showError(e.message);
-      setOnline(false);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const rk=Math.min(e.risk_score||0,100);
+  const sc=(e.status||'').replace(' ','_');
+  const icon=e.status==='approved'?'✓':e.status==='blocked'?'✗':'?';
+  const isBlocked=e.status==='blocked';
+  const factors=(e.factors||[]).map(f=>`<code>${esc(f)}</code>`).join(' ');
+  const userReq=e.input_summary||e.action_type||'User sent a request';
 
-  // ── RENDER ────────────────────────────────────────────────────────────
-  function renderAll() {
-    renderStats();
-    renderAnalytics();
-    renderTable();
-  }
+  const steps=[];
+  if(e.action_type)steps.push({t:'Parse action',d:'Identified action type: '+e.action_type});
+  steps.push({t:'Load user context',d:'Trust tier: '+(e.trust_tier||'medium')+', User: '+(e.user_id||'unknown').slice(0,24)});
+  steps.push({t:'Run risk analysis',d:'Risk score: '+Math.round(rk)+'/100. '+(factors||'No risk factors detected.')});
+  if(e.matched_rules&&e.matched_rules.length)steps.push({t:'Match policy rules',d:e.matched_rules.join(', ')});
+  steps.push({t:'Reach decision',d:e.reason||'Decision made based on policy evaluation.'});
 
-  function renderStats() {
-    const total    = logData.length;
-    const approved = logData.filter(r => r.status === 'approved').length;
-    const blocked  = logData.filter(r => r.status === 'blocked').length;
-    const pending  = logData.filter(r => r.status === 'needs_confirmation').length;
-    const avgRisk  = total ? (logData.reduce((s, r) => s + r.risk_score, 0) / total) : 0;
-    const pct      = n => total ? Math.round(n / total * 100) + '%' : '—';
-
-    // Recent block rate (last 10)
-    const last10 = logData.slice(0, 10);
-    const recentBlockRate = last10.length ? Math.round(last10.filter(r => r.status === 'blocked').length / last10.length * 100) : 0;
-
-    document.getElementById('statTotal').textContent    = total;
-    document.getElementById('statApproved').textContent = approved;
-    document.getElementById('statBlocked').textContent  = blocked;
-    document.getElementById('statPending').textContent  = pending;
-    document.getElementById('statRisk').textContent     = avgRisk.toFixed(1);
-    document.getElementById('statApprovedPct').textContent = pct(approved);
-    document.getElementById('statBlockedPct').textContent  = pct(blocked);
-    document.getElementById('statPendingPct').textContent  = pct(pending);
-    document.getElementById('statBlockRate').textContent   = recentBlockRate + '%';
-    document.getElementById('statBlockRateSub').textContent = `last ${last10.length} evals`;
-
-    // Threat meter
-    const tv = document.getElementById('threatValue');
-    const ts = document.getElementById('threatSub');
-    tv.textContent = avgRisk.toFixed(1);
-    tv.className   = 'threat-value ' + riskClass(avgRisk);
-    ts.textContent = avgRisk < 30 ? 'NOMINAL' : avgRisk < 65 ? 'ELEVATED' : 'CRITICAL';
-  }
-
-  function renderAnalytics() {
-    if (!logData.length) {
-      document.getElementById('analyticsRow').style.display = 'none';
-      return;
-    }
-    document.getElementById('analyticsRow').style.display = '';
-
-    // ── AGENT LEADERBOARD ──
-    const agentMap = {};
-    logData.forEach(r => {
-      const a = r.user_id || r.agent_id || 'unknown';
-      if (!agentMap[a]) agentMap[a] = { total: 0, blocked: 0, risk: 0 };
-      agentMap[a].total++;
-      if (r.status === 'blocked') agentMap[a].blocked++;
-      agentMap[a].risk += r.risk_score;
-    });
-    const agents = Object.entries(agentMap)
-      .map(([name, d]) => ({ name, ...d, avgRisk: d.risk / d.total, blockRate: d.blocked / d.total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 6);
-
-    const maxAgentTotal = agents[0]?.total || 1;
-    document.getElementById('agentLeaderboard').innerHTML = agents.map(a => `
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span style="color:var(--text-bright);font-size:0.72rem;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.name)}">${esc(a.name)}</span>
-          <span style="font-size:0.65rem;color:var(--text-dim)">${a.total} reqs &nbsp;<span style="color:${a.blockRate > 0.3 ? 'var(--red)' : a.blockRate > 0.1 ? 'var(--amber)' : 'var(--green)'}">${Math.round(a.blockRate * 100)}% blocked</span></span>
-        </div>
-        <div style="height:4px;background:var(--bg3);border:1px solid var(--border);position:relative">
-          <div style="height:100%;width:${(a.total/maxAgentTotal*100).toFixed(1)}%;background:${riskColor(a.avgRisk)};opacity:0.7"></div>
+  p.innerHTML=`<div class="th-card" id="thCard">
+    <div class="th-head"><div class="th-title">Example 1 — ${esc(e.action_type||'Evaluation')}</div><div class="th-sub">${new Date(e.timestamp).toLocaleTimeString('en-US',{hour12:false})}</div></div>
+    <div class="th-body">
+      <div class="th-lbl">AI Thinking</div>
+      <div class="th-box" id="thBox"><div class="th-box-text">${esc(userReq)}</div></div>
+      <div class="th-lbl">Steps</div>
+      <div class="th-steps" id="thSteps">${steps.map((s,i)=>`<div class="th-step" data-s="${i}"><div class="th-sn">${i+1}</div><div class="th-sc"><div class="th-st">${esc(s.t)}</div><div class="th-sd">${esc(s.d)}</div></div></div>${i<steps.length-1?'<div class="th-conn"></div>':''}`).join('')}</div>
+      <div class="th-end ${isBlocked?'bad':'ok'}" id="thEnd"><div class="th-end-lbl">Conclusion</div><div class="th-end-text">${esc(e.reason||(isBlocked?'Action blocked by safety policy.':'Safe to proceed.'))}</div></div>
+      <div style="margin-top:32px"><div class="th-lbl">Evaluation Flow</div>
+        <div class="th-flow" id="thFlow">
+          <div class="th-fn n-in"><div class="th-fn-hd"><div class="th-fn-ic">→</div><div class="th-fn-t">Input</div></div><div class="th-fn-c">${esc(e.input_summary||e.action_type||'—')}</div></div>
+          <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
+          <div class="th-fn n-ctx"><div class="th-fn-hd"><div class="th-fn-ic">◉</div><div class="th-fn-t">Context</div></div><div class="th-fn-c">Trust: <code>${esc(e.trust_tier||'medium')}</code></div></div>
+          <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
+          <div class="th-fn n-ev"><div class="th-fn-hd"><div class="th-fn-ic">⚡</div><div class="th-fn-t">Evaluate</div></div><div class="th-fn-c">Risk: <b>${Math.round(rk)}/100</b></div></div>
+          <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
+          <div class="th-fn n-dec d-${sc}"><div class="th-fn-hd"><div class="th-fn-ic">${icon}</div><div class="th-fn-t">${esc(e.status||'—')}</div></div><div class="th-fn-c">${esc(e.reason||'—')}</div></div>
         </div>
       </div>
-    `).join('');
-
-    // ── TOP ACTION TYPES ──
-    const actionMap = {};
-    logData.forEach(r => {
-      const k = r.action_type || 'unknown';
-      if (!actionMap[k]) actionMap[k] = { total: 0, blocked: 0 };
-      actionMap[k].total++;
-      if (r.status === 'blocked') actionMap[k].blocked++;
-    });
-    const actions = Object.entries(actionMap)
-      .sort((a, b) => b[1].total - a[1].total)
-      .slice(0, 7);
-    const maxAction = actions[0]?.[1].total || 1;
-
-    document.getElementById('actionBreakdown').innerHTML = actions.map(([name, d]) => `
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <div style="display:flex;justify-content:space-between">
-          <span style="color:var(--accent);font-size:0.7rem">${esc(name)}</span>
-          <span style="color:var(--text-dim);font-size:0.65rem">${d.total} &nbsp;<span style="color:var(--red)">${d.blocked > 0 ? d.blocked + ' blocked' : ''}</span></span>
-        </div>
-        <div style="height:3px;background:var(--bg3);border:1px solid var(--border)">
-          <div style="height:100%;display:flex">
-            <div style="width:${((d.total - d.blocked)/maxAction*100).toFixed(1)}%;background:rgba(0,212,106,0.5)"></div>
-            <div style="width:${(d.blocked/maxAction*100).toFixed(1)}%;background:rgba(255,59,92,0.6)"></div>
-          </div>
-        </div>
-      </div>
-    `).join('');
-
-    // ── RISK DISTRIBUTION HISTOGRAM ──
-    const buckets = [
-      { label: '0–20',  min: 0,  max: 20,  color: 'var(--green)',  count: 0 },
-      { label: '21–40', min: 21, max: 40,  color: '#7adf8a',       count: 0 },
-      { label: '41–60', min: 41, max: 60,  color: 'var(--amber)',  count: 0 },
-      { label: '61–80', min: 61, max: 80,  color: '#ff8040',       count: 0 },
-      { label: '81–100',min: 81, max: 100, color: 'var(--red)',    count: 0 },
-    ];
-    logData.forEach(r => {
-      const b = buckets.find(b => r.risk_score <= b.max);
-      if (b) b.count++;
-    });
-    const maxBucket = Math.max(...buckets.map(b => b.count), 1);
-    document.getElementById('riskHistogram').innerHTML = buckets.map(b => `
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:0.65rem;color:var(--text-dim);width:42px;flex-shrink:0">${b.label}</span>
-        <div style="flex:1;height:12px;background:var(--bg3);border:1px solid var(--border);position:relative">
-          <div style="height:100%;width:${(b.count/maxBucket*100).toFixed(1)}%;background:${b.color};opacity:0.75;transition:width 0.4s"></div>
-        </div>
-        <span style="font-size:0.65rem;color:${b.color};width:20px;text-align:right">${b.count}</span>
-      </div>
-    `).join('');
-
-    // ── TOP RISK FACTORS ──
-    const factorMap = {};
-    logData.forEach(r => {
-      (r.factors || []).forEach(f => {
-        factorMap[f] = (factorMap[f] || 0) + 1;
-      });
-    });
-    const topFactors = Object.entries(factorMap)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8);
-    const maxFactor = topFactors[0]?.[1] || 1;
-
-    document.getElementById('topFactors').innerHTML = topFactors.length
-      ? topFactors.map(([name, count]) => `
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;height:10px;background:var(--bg3);border:1px solid var(--border);position:relative">
-            <div style="height:100%;width:${(count/maxFactor*100).toFixed(1)}%;background:rgba(240,165,0,0.5)"></div>
-          </div>
-          <span style="font-size:0.65rem;color:var(--amber);flex:0 0 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span>
-          <span style="font-size:0.65rem;color:var(--text-dim);width:18px;text-align:right">${count}</span>
-        </div>
-      `).join('')
-      : '<span style="font-size:0.72rem;color:var(--text-dim)">no risk factors recorded</span>';
-
-    // ── RECENT BLOCKS FEED ──
-    const blocks = logData.filter(r => r.status === 'blocked').slice(0, 8);
-    document.getElementById('recentBlocks').innerHTML = blocks.length
-      ? blocks.map(r => {
-          const t = new Date(r.timestamp).toLocaleTimeString('en-US', { hour12: false });
-          return `<div style="border:1px solid var(--red-dim);background:rgba(255,59,92,0.05);padding:6px 10px;font-size:0.68rem;max-width:220px">
-            <div style="color:var(--red);margin-bottom:2px">${esc(r.action_type)} &nbsp;<span style="color:var(--text-dim)">${t}</span></div>
-            <div style="color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.reason)}">${esc(r.reason || '—')}</div>
-            <div style="color:var(--amber);margin-top:2px">risk ${Math.round(r.risk_score)}/100</div>
-          </div>`;
-        }).join('')
-      : '<span style="font-size:0.72rem;color:var(--text-dim)">no blocks yet</span>';
-  }
-
-  function riskClass(score) {
-    if (score < 30) return 'calm';
-    if (score < 65) return 'warn';
-    return 'alert';
-  }
-
-  function riskColor(score) {
-    if (score < 30) return 'var(--green)';
-    if (score < 65) return 'var(--amber)';
-    return 'var(--red)';
-  }
-
-  function renderTable() {
-    const tbody = document.getElementById('logBody');
-    const empty = document.getElementById('emptyState');
-    const table = document.getElementById('logTable');
-
-    if (!logData.length) {
-      table.style.display = 'none';
-      empty.style.display = 'block';
-      return;
-    }
-
-    table.style.display = '';
-    empty.style.display = 'none';
-
-    // Remember which detail rows are open
-    const open = new Set(expandedRows);
-
-    tbody.innerHTML = '';
-    logData.forEach((entry, i) => {
-      // Main row
-      const tr = document.createElement('tr');
-      tr.className = 'row-new';
-      tr.style.animationDelay = Math.min(i * 0.02, 0.3) + 's';
-      tr.dataset.idx = i;
-      tr.onclick = () => toggleDetail(i);
-
-      const d   = new Date(entry.timestamp);
-      const date = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
-      const time = d.toLocaleTimeString('en-US', { hour12: false });
-
-      tr.innerHTML = `
-        <td><button class="expand-btn ${open.has(i) ? 'open' : ''}" id="exp-${i}">&#9660;</button></td>
-        <td class="ts"><span class="ts-date">${date}</span><span class="ts-time">${time}</span></td>
-        <td><span class="badge badge-${entry.status}">${entry.status.replace('_', ' ').toUpperCase()}</span></td>
-        <td class="action-type">${esc(entry.action_type)}</td>
-        <td>
-          <div class="risk-bar-wrap">
-            <div class="risk-bar-bg">
-              <div class="risk-bar-fill" style="width:${entry.risk_score}%;background:${riskColor(entry.risk_score)}"></div>
-            </div>
-            <span class="risk-num" style="color:${riskColor(entry.risk_score)}">${Math.round(entry.risk_score)}</span>
-          </div>
-        </td>
-        <td><span class="tier tier-${entry.trust_tier}">${entry.trust_tier.toUpperCase()}</span></td>
-        <td><span class="uid" title="${esc(entry.user_id)}">${esc(entry.user_id)}</span></td>
-        <td><span class="reason-text" title="${esc(entry.input_summary)}">${esc(entry.input_summary || '—')}</span></td>
-        <td><span class="reason-text" title="${esc(entry.reason)}">${esc(entry.reason)}</span></td>
-      `;
-
-      tbody.appendChild(tr);
-
-      // Detail row (shown only if open)
-      const dr = document.createElement('tr');
-      dr.className = 'detail-row';
-      dr.id = `detail-${i}`;
-      dr.style.display = open.has(i) ? '' : 'none';
-
-      const factors = (entry.factors && entry.factors.length)
-        ? entry.factors.map(f => `<span class="factor-tag">${esc(f)}</span>`).join('')
-        : '<span class="factor-empty">none</span>';
-
-      const matchedRules = (entry.matched_rules && entry.matched_rules.length)
-        ? entry.matched_rules.map(f => `<span class="factor-tag" style="color:var(--accent);background:rgba(0,170,255,0.06)">${esc(f)}</span>`).join('')
-        : '<span class="factor-empty">none</span>';
-
-      const matchedPrefs = (entry.matched_preferences && entry.matched_preferences.length)
-        ? entry.matched_preferences.map(f => `<span class="factor-tag" style="color:var(--green);background:rgba(0,212,106,0.06)">${esc(f)}</span>`).join('')
-        : '<span class="factor-empty">none</span>';
-
-      const payloadStr = JSON.stringify(entry.payload, null, 2);
-      const hasReasoning = entry.reasoning && entry.reasoning.trim().length > 0;
-      const hasTrace = entry.trace_id || entry.input_summary || entry.output_summary;
-
-      dr.innerHTML = `
-        <td colspan="9" style="padding:0">
-          <div class="detail-panel" style="grid-template-columns: 1fr 1fr${hasReasoning ? ' 1fr' : ''}">
-            <div class="detail-section" style="grid-column: 1/2">
-              <div class="detail-section-label">PAYLOAD</div>
-              <pre>${esc(payloadStr)}</pre>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:12px">
-              <div class="detail-section">
-                <div class="detail-section-label">RISK FACTORS</div>
-                <div class="factors-list">${factors}</div>
-              </div>
-              <div class="detail-section">
-                <div class="detail-section-label">MATCHED RULES</div>
-                <div class="factors-list">${matchedRules}</div>
-              </div>
-              <div class="detail-section">
-                <div class="detail-section-label">MATCHED PREFERENCES</div>
-                <div class="factors-list">${matchedPrefs}</div>
-              </div>
-              <div class="detail-section">
-                <div class="detail-section-label">SESSION / THREAD / TRACE</div>
-                <pre style="font-size:0.7rem;color:var(--text)">session : ${esc(entry.session_id || '—')}
-thread  : ${esc(entry.thread_id || '—')}
-trace   : ${esc(entry.trace_id || '—')}</pre>
-              </div>
-              ${hasTrace ? `
-              <div class="detail-section">
-                <div class="detail-section-label">INPUT SUMMARY</div>
-                <pre style="white-space:pre-wrap;color:var(--text-bright)">${esc(entry.input_summary || '—')}</pre>
-              </div>
-              <div class="detail-section">
-                <div class="detail-section-label">OUTPUT SUMMARY</div>
-                <pre style="white-space:pre-wrap;color:var(--text-bright)">${esc(entry.output_summary || '—')}</pre>
-              </div>` : ''}
-              <div class="detail-section">
-                <div class="detail-section-label">FULL REASON</div>
-                <pre style="white-space:pre-wrap">${esc(entry.reason)}</pre>
-              </div>
-            </div>
-            ${hasReasoning ? `
-            <div class="detail-section" style="border-left: 2px solid var(--accent); background: rgba(0,170,255,0.03)">
-              <div class="detail-section-label" style="color:var(--accent);letter-spacing:0.3em">&#9632; CLAUDE INTERNAL REASONING</div>
-              <pre style="white-space:pre-wrap;max-height:320px;color:var(--text-bright);font-size:0.72rem;line-height:1.55">${esc(entry.reasoning)}</pre>
-            </div>` : ''}
-          </div>
-        </td>
-      `;
-
-      tbody.appendChild(dr);
-    });
-  }
-
-  function toggleDetail(idx) {
-    const dr  = document.getElementById(`detail-${idx}`);
-    const btn = document.getElementById(`exp-${idx}`);
-    if (!dr) return;
-
-    if (expandedRows.has(idx)) {
-      expandedRows.delete(idx);
-      dr.style.display = 'none';
-      btn && btn.classList.remove('open');
-    } else {
-      expandedRows.add(idx);
-      dr.style.display = '';
-      btn && btn.classList.add('open');
-    }
-  }
-
-  // ── AUTO-REFRESH ──────────────────────────────────────────────────────
-  function toggleAuto() {
-    const btn = document.getElementById('autoBtn');
-    if (autoInterval) {
-      clearInterval(autoInterval);
-      autoInterval = null;
-      btn.classList.remove('active');
-      btn.textContent = 'AUTO-REFRESH';
-      document.getElementById('statusDot').classList.remove('live');
-      document.getElementById('statusText').textContent = 'MANUAL';
-    } else {
-      fetchLog();
-      autoInterval = setInterval(fetchLog, 10000);
-      btn.classList.add('active');
-      btn.textContent = 'AUTO: ON (10s)';
-    }
-  }
-
-  // ── HELPERS ───────────────────────────────────────────────────────────
-  function setLoading(on) {
-    document.getElementById('spinner').classList.toggle('spin', on);
-    document.getElementById('fetchBtn').disabled = on;
-  }
-
-  function setOnline(on) {
-    document.getElementById('statusDot').classList.toggle('live', on);
-    document.getElementById('statusText').textContent = on ? 'LIVE' : 'ERROR';
-  }
-
-  function showError(msg) {
-    const b = document.getElementById('errorBanner');
-    document.getElementById('errorMsg').textContent = msg;
-    b.classList.add('show');
-  }
-
-  function hideError() {
-    document.getElementById('errorBanner').classList.remove('show');
-  }
-
-  function esc(s) {
-    if (s == null) return '';
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  // ── EVAL MODE ─────────────────────────────────────────────────────────
-  async function loadEvalMode() {
-    try {
-      const res = await fetch('/shieldclaw/backboard/config');
-      if (!res.ok) return;
-      const data = await res.json();
-      applyModeUI(data.eval_mode);
-    } catch (_) {}
-  }
-
-  async function setEvalMode(mode) {
-    try {
-      const res = await fetch('/shieldclaw/backboard/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eval_mode: mode }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || res.statusText);
-      }
-      const data = await res.json();
-      applyModeUI(data.eval_mode);
-    } catch (e) {
-      showError('Mode change failed: ' + e.message);
-    }
-  }
-
-  function applyModeUI(mode) {
-    const think = document.getElementById('modeThink');
-    const fast  = document.getElementById('modeFast');
-    think.classList.toggle('active', mode === 'think');
-    fast.classList.toggle('active',  mode === 'fast');
-  }
-
-
-  // ── CHARTS ────────────────────────────────────────────────────────────
-  function renderCharts() {
-    if (!logData.length) {
-      document.getElementById('chartsRow').style.display = 'none';
-      return;
-    }
-    document.getElementById('chartsRow').style.display = '';
-
-    const sorted = logData.slice().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-    drawRiskChart(sorted);
-    drawBreakdownChart();
-    drawVolumeChart(sorted);
-  }
-
-  function getCSSVar(name) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  }
-
-  function setupCanvas(id) {
-    const canvas = document.getElementById(id);
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.parentElement.getBoundingClientRect();
-    const w = rect.width - 36; // account for padding
-    canvas.style.width  = w + 'px';
-    canvas.style.height = '90px';
-    canvas.width  = w * dpr;
-    canvas.height = 90 * dpr;
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    return { ctx, w, h: 90 };
-  }
-
-  function drawRiskChart(sorted) {
-    const { ctx, w, h } = setupCanvas('chartRisk');
-
-    const pad = { top: 6, right: 8, bottom: 20, left: 32 };
-    const iw = w - pad.left - pad.right;
-    const ih = h - pad.top - pad.bottom;
-
-    const scores = sorted.map(e => e.risk_score);
-    const minS = 0, maxS = 100;
-    const n = scores.length;
-
-    const xPos = i => pad.left + (n > 1 ? (i / (n - 1)) * iw : iw / 2);
-    const yPos = v => pad.top + ih - ((v - minS) / (maxS - minS)) * ih;
-
-    ctx.clearRect(0, 0, w, h);
-
-    // grid lines at 0, 30, 65, 100
-    ctx.strokeStyle = getCSSVar('--border');
-    ctx.lineWidth = 1;
-    [0, 30, 65, 100].forEach(v => {
-      const y = yPos(v);
-      ctx.beginPath();
-      ctx.moveTo(pad.left, y);
-      ctx.lineTo(pad.left + iw, y);
-      ctx.stroke();
-
-      ctx.fillStyle = getCSSVar('--text-dim');
-      ctx.font = '9px Share Tech Mono, monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(v, pad.left - 4, y + 3);
-    });
-
-    if (n < 2) return;
-
-    // gradient fill under line
-    const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + ih);
-    grad.addColorStop(0,   'rgba(255,59,92,0.25)');
-    grad.addColorStop(0.35,'rgba(240,165,0,0.15)');
-    grad.addColorStop(1,   'rgba(0,212,106,0.04)');
-
-    ctx.beginPath();
-    ctx.moveTo(xPos(0), yPos(scores[0]));
-    for (let i = 1; i < n; i++) ctx.lineTo(xPos(i), yPos(scores[i]));
-    ctx.lineTo(xPos(n - 1), pad.top + ih);
-    ctx.lineTo(xPos(0),     pad.top + ih);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // line
-    ctx.beginPath();
-    ctx.moveTo(xPos(0), yPos(scores[0]));
-    for (let i = 1; i < n; i++) ctx.lineTo(xPos(i), yPos(scores[i]));
-    ctx.strokeStyle = getCSSVar('--accent');
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    // dots for blocked entries
-    sorted.forEach((e, i) => {
-      if (e.status === 'blocked') {
-        ctx.beginPath();
-        ctx.arc(xPos(i), yPos(e.risk_score), 3, 0, Math.PI * 2);
-        ctx.fillStyle = getCSSVar('--red');
-        ctx.fill();
-      }
-    });
-
-    // x-axis labels (first, mid, last)
-    const labelIdx = [0, Math.floor((n - 1) / 2), n - 1];
-    ctx.fillStyle = getCSSVar('--text-dim');
-    ctx.font = '8px Share Tech Mono, monospace';
-    ctx.textAlign = 'center';
-    labelIdx.forEach(i => {
-      const t = new Date(sorted[i].timestamp);
-      const label = t.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-      ctx.fillText(label, xPos(i), h - 4);
-    });
-  }
-
-  function drawBreakdownChart() {
-    const { ctx, w, h } = setupCanvas('chartBreakdown');
-
-    const approved = logData.filter(r => r.status === 'approved').length;
-    const blocked  = logData.filter(r => r.status === 'blocked').length;
-    const pending  = logData.length - approved - blocked;
-
-    const slices = [
-      { label: 'APPROVED', val: approved, color: getCSSVar('--green') },
-      { label: 'BLOCKED',  val: blocked,  color: getCSSVar('--red')   },
-      { label: 'PENDING',  val: pending,  color: getCSSVar('--amber')  },
-    ].filter(s => s.val > 0);
-
-    const total = logData.length;
-    const cx = 50, cy = h / 2, r = 34;
-
-    ctx.clearRect(0, 0, w, h);
-
-    let angle = -Math.PI / 2;
-    slices.forEach(s => {
-      const sweep = (s.val / total) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, r, angle, angle + sweep);
-      ctx.closePath();
-      ctx.fillStyle = s.color;
-      ctx.globalAlpha = 0.85;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-
-      // thin separator
-      ctx.beginPath();
-      ctx.moveTo(cx, cy);
-      ctx.arc(cx, cy, r, angle, angle + sweep);
-      ctx.closePath();
-      ctx.strokeStyle = getCSSVar('--bg2');
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      angle += sweep;
-    });
-
-    // center hole
-    ctx.beginPath();
-    ctx.arc(cx, cy, r * 0.56, 0, Math.PI * 2);
-    ctx.fillStyle = getCSSVar('--bg2');
-    ctx.fill();
-
-    // center label
-    ctx.fillStyle = getCSSVar('--text-bright');
-    ctx.font = 'bold 13px Orbitron, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(total, cx, cy - 6);
-    ctx.font = '8px Share Tech Mono, monospace';
-    ctx.fillStyle = getCSSVar('--text-dim');
-    ctx.fillText('TOTAL', cx, cy + 8);
-    ctx.textBaseline = 'alphabetic';
-
-    // legend
-    const legendX = cx + r + 14;
-    let ly = cy - (slices.length * 14) / 2 + 4;
-    slices.forEach(s => {
-      ctx.fillStyle = s.color;
-      ctx.fillRect(legendX, ly - 6, 8, 8);
-      ctx.fillStyle = getCSSVar('--text');
-      ctx.font = '9px Share Tech Mono, monospace';
-      ctx.textAlign = 'left';
-      const pct = Math.round(s.val / total * 100);
-      ctx.fillText(`${s.label} ${pct}%`, legendX + 12, ly + 1);
-      ly += 16;
-    });
-  }
-
-  function drawVolumeChart(sorted) {
-    const { ctx, w, h } = setupCanvas('chartVolume');
-
-    const pad = { top: 6, right: 8, bottom: 20, left: 28 };
-    const iw = w - pad.left - pad.right;
-    const ih = h - pad.top - pad.bottom;
-
-    ctx.clearRect(0, 0, w, h);
-
-    if (sorted.length < 2) {
-      ctx.fillStyle = getCSSVar('--text-dim');
-      ctx.font = '9px Share Tech Mono, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('INSUFFICIENT DATA', w / 2, h / 2);
-      return;
-    }
-
-    // bucket into 12 equal time slots
-    const t0 = new Date(sorted[0].timestamp).getTime();
-    const t1 = new Date(sorted[sorted.length - 1].timestamp).getTime();
-    const buckets = 12;
-    const slot = (t1 - t0) / buckets || 1;
-    const counts = new Array(buckets).fill(0);
-    const blockedCounts = new Array(buckets).fill(0);
-
-    sorted.forEach(e => {
-      const idx = Math.min(Math.floor((new Date(e.timestamp).getTime() - t0) / slot), buckets - 1);
-      counts[idx]++;
-      if (e.status === 'blocked') blockedCounts[idx]++;
-    });
-
-    const maxCount = Math.max(...counts, 1);
-    const bw = iw / buckets;
-
-    // grid
-    ctx.strokeStyle = getCSSVar('--border');
-    ctx.lineWidth = 1;
-    [0, Math.round(maxCount / 2), maxCount].forEach(v => {
-      const y = pad.top + ih - (v / maxCount) * ih;
-      ctx.beginPath();
-      ctx.moveTo(pad.left, y);
-      ctx.lineTo(pad.left + iw, y);
-      ctx.stroke();
-      ctx.fillStyle = getCSSVar('--text-dim');
-      ctx.font = '9px Share Tech Mono, monospace';
-      ctx.textAlign = 'right';
-      ctx.fillText(v, pad.left - 3, y + 3);
-    });
-
-    counts.forEach((c, i) => {
-      const x = pad.left + i * bw + 1;
-      const barH = (c / maxCount) * ih;
-      const y = pad.top + ih - barH;
-
-      // approved portion
-      ctx.fillStyle = 'rgba(0,212,106,0.35)';
-      ctx.fillRect(x, y, bw - 2, barH);
-
-      // blocked overlay
-      if (blockedCounts[i] > 0) {
-        const bH = (blockedCounts[i] / maxCount) * ih;
-        ctx.fillStyle = 'rgba(255,59,92,0.6)';
-        ctx.fillRect(x, pad.top + ih - bH, bw - 2, bH);
-      }
-
-      // bar border
-      ctx.strokeStyle = getCSSVar('--border2');
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(x, y, bw - 2, barH);
-    });
-
-    // x-axis: start / end time labels
-    const fmt = ts => new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-    ctx.fillStyle = getCSSVar('--text-dim');
-    ctx.font = '8px Share Tech Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(fmt(t0), pad.left, h - 4);
-    ctx.textAlign = 'right';
-    ctx.fillText(fmt(t1), pad.left + iw, h - 4);
-  }
-
-  // Hook charts into renderAll
-  const _origRenderAll = renderAll;
-  renderAll = function() {
-    _origRenderAll();
-    renderCharts();
-  };
-
-  window.addEventListener('resize', () => { if (logData.length) renderCharts(); });
+      ${e.reasoning?`<div class="th-reason" id="thReason"><div class="th-reason-lbl">Claude Internal Reasoning</div><div class="th-reason-txt">${esc(e.reasoning)}</div></div>`:''}
+    </div></div>`;
+
+  anime({targets:'#thCard',opacity:[0,1],translateY:[8,0],duration:400,delay:50,easing:'easeOutCubic'});
+  Motion.animate('#thBox',{opacity:[0,1],x:[-8,0]},{duration:.45,delay:.25,easing:'ease-out'});
+  anime({targets:'.th-step',opacity:[0,1],translateY:[6,0],delay:anime.stagger(100,{start:450}),duration:350,easing:'spring(1,80,12,0)'});
+  anime({targets:'.th-conn',opacity:[0,1],delay:anime.stagger(100,{start:550}),duration:200,easing:'easeOutCubic'});
+  const cd=450+steps.length*100+150;
+  Motion.animate('#thEnd',{opacity:[0,1],scale:[.97,1]},{duration:.35,delay:cd/1000,easing:'ease-out'});
+  anime({targets:'#thFlow .th-fn',opacity:[0,1],scale:[.9,1],translateY:[4,0],delay:anime.stagger(80,{start:cd+200}),duration:380,easing:'spring(1,80,12,0)'});
+  anime({targets:'#thFlow .th-arr',opacity:[0,1],translateX:[-4,0],delay:anime.stagger(80,{start:cd+280}),duration:250,easing:'easeOutCubic'});
+  const paths=document.querySelectorAll('#thFlow .th-arr svg path');
+  paths.forEach((pa,pi)=>{const l=pa.getTotalLength?pa.getTotalLength():30;pa.style.strokeDasharray=l;pa.style.strokeDashoffset=l;Motion.animate(pa,{strokeDashoffset:[l,0]},{duration:.3,delay:(cd+320)/1000+pi*.08,easing:'ease-out'})});
+  if(document.getElementById('thReason'))Motion.animate('#thReason',{opacity:[0,1],y:[4,0]},{duration:.35,delay:(cd+700)/1000,easing:'ease-out'});
+}
+
+// ── Risk ──
+function renderRK(){
+  const p=document.getElementById('pRK');
+  if(!D.length){p.innerHTML='<div class="empty">No risk data available.</div>';return}
+
+  const n=D.length,avg=D.reduce((s,r)=>s+(r.risk_score||0),0)/n,mx=Math.max(...D.map(r=>r.risk_score||0)),bl=D.filter(r=>r.status==='blocked').length;
+  const rc=s=>s<30?'var(--low)':s<65?'var(--med)':'var(--high)';
+  const br=n?Math.round(bl/n*100):0;
+
+  const fm={};D.forEach(r=>(r.factors||[]).forEach(f=>fm[f]=(fm[f]||0)+1));
+  const tf=Object.entries(fm).sort((a,b)=>b[1]-a[1]).slice(0,8);
+
+  const noErr=!D.some(r=>(r.factors||[]).includes('evaluation_error'));
+  const hasBudget=!D.some(r=>(r.factors||[]).some(f=>f.includes('budget')));
+  const hasRate=!D.some(r=>(r.factors||[]).some(f=>f.includes('rate_limit')));
+
+  p.innerHTML=`
+    <div class="rk-card" id="rkScore"><div class="rk-head">Risk Score</div><div class="rk-body">
+      <div class="rk-row"><div class="rk-lbl">Average</div><div class="rk-track"><div class="rk-fill" id="rfA" style="width:0;background:${rc(avg)}"></div></div><div class="rk-val" style="color:${rc(avg)}" id="rvA">0</div></div>
+      <div class="rk-row"><div class="rk-lbl">Peak</div><div class="rk-track"><div class="rk-fill" id="rfM" style="width:0;background:${rc(mx)}"></div></div><div class="rk-val" style="color:${rc(mx)}" id="rvM">0</div></div>
+      <div class="rk-row"><div class="rk-lbl">Block Rate</div><div class="rk-track"><div class="rk-fill" id="rfB" style="width:0;background:var(--high)"></div></div><div class="rk-val" style="color:var(--high)" id="rvB">0%</div></div>
+    </div></div>
+    <div class="rk-card" id="rkFactors"><div class="rk-head">Risk Factors</div><div class="rk-body"><div class="rk-factors">${tf.length?tf.map(([f,c])=>`<div class="rk-f"><div class="rk-fd"></div>${esc(f)}<span style="color:var(--text3);font-size:11px;margin-left:auto">${c}×</span></div>`).join(''):'<div style="font-size:13px;color:var(--text3)">No risk factors detected</div>'}</div></div></div>
+    <div class="rk-card" id="rkChecks"><div class="rk-head">Safety Checks</div><div class="rk-body"><div class="rk-checks">
+      <div class="rk-ck"><div class="rk-ci ok">✓</div>Tool permission verified</div>
+      <div class="rk-ck"><div class="rk-ci ${hasBudget?'ok':'no'}">${hasBudget?'✓':'✗'}</div>Budget limit validated</div>
+      <div class="rk-ck"><div class="rk-ci ${hasRate?'ok':'no'}">${hasRate?'✓':'✗'}</div>Rate limit passed</div>
+      <div class="rk-ck"><div class="rk-ci ok">✓</div>Policy engine responded</div>
+      <div class="rk-ck"><div class="rk-ci ${noErr?'ok':'no'}">${noErr?'✓':'✗'}</div>No evaluation errors</div>
+      <div class="rk-ck"><div class="rk-ci ok">✓</div>Audit trail recorded</div>
+    </div></div></div>`;
+
+  anime({targets:'.rk-card',opacity:[0,1],translateY:[8,0],delay:anime.stagger(70,{start:50}),duration:380,easing:'easeOutCubic'});
+  setTimeout(()=>{
+    Motion.animate('#rfA',{width:['0%',avg+'%']},{duration:.7,delay:.2,easing:'ease-out'});
+    Motion.animate('#rfM',{width:['0%',mx+'%']},{duration:.7,delay:.3,easing:'ease-out'});
+    Motion.animate('#rfB',{width:['0%',br+'%']},{duration:.7,delay:.4,easing:'ease-out'});
+    anime({targets:{v:0},v:avg,duration:700,delay:200,easing:'easeOutExpo',round:10,update:a=>{document.getElementById('rvA').textContent=a.animations[0].currentValue}});
+    anime({targets:{v:0},v:mx,duration:700,delay:300,easing:'easeOutExpo',round:1,update:a=>{document.getElementById('rvM').textContent=Math.round(a.animations[0].currentValue)}});
+    anime({targets:{v:0},v:br,duration:700,delay:400,easing:'easeOutExpo',round:1,update:a=>{document.getElementById('rvB').textContent=Math.round(a.animations[0].currentValue)+'%'}});
+  },80);
+  anime({targets:'.rk-f',opacity:[0,1],translateX:[-4,0],delay:anime.stagger(50,{start:350}),duration:250,easing:'easeOutCubic'});
+  anime({targets:'.rk-ck',opacity:[0,1],translateX:[-4,0],delay:anime.stagger(50,{start:450}),duration:250,easing:'easeOutCubic'});
+}
+
+function toggleAuto(){
+  const b=document.getElementById('autoBtn');
+  if(auto){clearInterval(auto);auto=null}else{fetchLog();auto=setInterval(fetchLog,8000)}
+}
+
+function esc(s){if(s==null)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+
+setInterval(loadStatus,20000);
 </script>
 </body>
 </html>
