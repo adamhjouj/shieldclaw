@@ -13,6 +13,15 @@ import anthropic
 
 from .types import ActionRequest, Decision
 from . import thread_manager, memory, logger
+from .trace import DecisionTrace, build_decision_trace
+from .capture import (
+    OpenClawInput,
+    OpenClawOutput,
+    InteractionRecord,
+    capture_openclaw_input,
+    capture_openclaw_output,
+)
+from . import backboard
 
 _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -157,3 +166,107 @@ def _build_prompt(
         parts.append(f"Recent session actions: {json.dumps(recent, indent=2)}")
 
     return "\n\n".join(parts)
+
+
+# ── High-level orchestration with OpenClaw capture + decision trace ──
+
+def evaluate_shieldbot_request(
+    *,
+    user_request: str,
+    action_type: str,
+    payload: dict | None = None,
+    proposed_action: str = "",
+    proposed_details: dict | None = None,
+    tool_calls: list[str] | None = None,
+    user_id: str = "anonymous",
+    session_id: str = "default",
+    user_preferences: dict | None = None,
+    trust_tier: str = "medium",
+) -> tuple[Decision, DecisionTrace, InteractionRecord]:
+    """Full Shieldbot evaluation with OpenClaw capture and decision trace.
+
+    This is the top-level entry point that:
+    1. Captures the OpenClaw input (user request + parsed action)
+    2. Captures the OpenClaw output (proposed action)
+    3. Evaluates via Claude
+    4. Builds a structured decision trace
+    5. Records the full interaction in the Backboard thread
+    6. Returns (decision, trace, interaction_record)
+    """
+    oc_input = capture_openclaw_input(
+        user_request=user_request,
+        action_type=action_type,
+        payload=payload,
+    )
+    oc_output = capture_openclaw_output(
+        proposed_action=proposed_action or f"Execute {action_type}",
+        details=proposed_details,
+        tool_calls=tool_calls,
+    )
+
+    req = ActionRequest(
+        user_id=user_id,
+        session_id=session_id,
+        action_type=action_type,
+        payload=payload or {},
+        user_preferences=user_preferences or {},
+    )
+    decision = evaluate(req, trust_tier=trust_tier)
+
+    # Derive matched rules/preferences from Claude's factors
+    matched_rules = [f for f in decision.factors if not f.startswith("user_")]
+    matched_prefs = [f for f in decision.factors if f.startswith("user_")]
+
+    trace = build_decision_trace(
+        thread_id=decision.thread_id or "",
+        user_id=user_id,
+        session_id=session_id,
+        action_type=action_type,
+        input_summary=oc_input.summarize(),
+        output_summary=oc_output.summarize(),
+        risk_factors=decision.factors,
+        risk_score=decision.risk_score,
+        decision=decision.status,
+        reason=decision.reason,
+        trust_tier=trust_tier,
+        matched_rules=matched_rules,
+        matched_preferences=matched_prefs,
+    )
+
+    record = InteractionRecord(
+        openclaw_input=oc_input,
+        openclaw_output=oc_output,
+        shieldbot_decision=decision.status,
+        shieldbot_reason=decision.reason,
+        risk_score=decision.risk_score,
+        risk_factors=decision.factors,
+        trace_id=trace.trace_id,
+        thread_id=decision.thread_id or "",
+    )
+
+    # Store everything in Backboard
+    backboard.log_decision_trace(decision.thread_id or "", session_id, trace)
+    backboard.record_interaction(session_id, record)
+
+    return decision, trace, record
+
+
+def record_openclaw_interaction(
+    oc_input: OpenClawInput,
+    oc_output: OpenClawOutput,
+    decision: Decision,
+    session_id: str,
+) -> InteractionRecord:
+    """Record an already-evaluated interaction into the Backboard thread."""
+    record = InteractionRecord(
+        openclaw_input=oc_input,
+        openclaw_output=oc_output,
+        shieldbot_decision=decision.status,
+        shieldbot_reason=decision.reason,
+        risk_score=decision.risk_score,
+        risk_factors=decision.factors,
+        trace_id="manual",
+        thread_id=decision.thread_id or "",
+    )
+    backboard.record_interaction(session_id, record)
+    return record
