@@ -1,7 +1,8 @@
-"""Backboard-style thread manager — SQLite-backed.
+"""Thread manager — real Backboard.io threads + SQLite persistence.
 
-Threads provide per-task/session context for Shieldbot evaluations.
-Persists across process restarts via a local SQLite database.
+Every session gets a real persistent thread on Backboard.io.
+Thread IDs are also stored in local SQLite so we can map
+session_id → Backboard thread_id across restarts.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from . import config
+from . import config, backboard_client
 
 
 def _conn() -> sqlite3.Connection:
@@ -49,8 +50,16 @@ def get_or_create_thread(session_id: str, user_id: str) -> dict[str, Any]:
                 "created_at": row["created_at"],
                 "history": json.loads(row["history"]),
             }
+
+        # Create a real Backboard.io thread
+        try:
+            bb_thread = backboard_client.create_thread()
+            thread_id = bb_thread["thread_id"]
+        except Exception:
+            thread_id = str(uuid.uuid4())
+
         thread = {
-            "thread_id": str(uuid.uuid4()),
+            "thread_id": thread_id,
             "session_id": session_id,
             "user_id": user_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -58,7 +67,7 @@ def get_or_create_thread(session_id: str, user_id: str) -> dict[str, Any]:
         }
         conn.execute(
             "INSERT INTO threads (session_id, thread_id, user_id, created_at, history) VALUES (?,?,?,?,?)",
-            (session_id, thread["thread_id"], user_id, thread["created_at"], "[]"),
+            (session_id, thread_id, user_id, thread["created_at"], "[]"),
         )
         conn.commit()
         return thread
@@ -66,10 +75,12 @@ def get_or_create_thread(session_id: str, user_id: str) -> dict[str, Any]:
 
 def append_to_thread(session_id: str, entry: dict[str, Any]) -> None:
     entry["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Store locally in SQLite
     with _conn() as conn:
         _init_db(conn)
         row = conn.execute(
-            "SELECT history FROM threads WHERE session_id = ?", (session_id,)
+            "SELECT thread_id, history FROM threads WHERE session_id = ?", (session_id,)
         ).fetchone()
         if row is None:
             return
@@ -80,6 +91,18 @@ def append_to_thread(session_id: str, entry: dict[str, Any]) -> None:
             (json.dumps(history), session_id),
         )
         conn.commit()
+        thread_id = row["thread_id"]
+
+    # Also push to Backboard.io
+    try:
+        backboard_client.add_message(
+            thread_id,
+            json.dumps(entry, default=str),
+            memory="Auto",
+            send_to_llm="false",
+        )
+    except Exception:
+        pass
 
 
 def get_thread(session_id: str) -> dict[str, Any] | None:

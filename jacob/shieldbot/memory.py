@@ -9,7 +9,7 @@ import json
 import sqlite3
 from typing import Any
 
-from . import config
+from . import config, backboard_client
 
 
 def _conn() -> sqlite3.Connection:
@@ -78,6 +78,15 @@ def update_user_memory(user_id: str, decision_record: dict[str, Any]) -> None:
             (json.dumps(history), denial_count, approval_count, user_id),
         )
         conn.commit()
+
+    # Also push to Backboard.io
+    try:
+        backboard_client.add_memory(
+            content=json.dumps(decision_record, default=str),
+            metadata={"user_id": user_id, "type": "decision"},
+        )
+    except Exception:
+        pass
 
 
 def set_user_preference(user_id: str, key: str, value: Any) -> None:

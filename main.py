@@ -19,6 +19,8 @@ from policy_parser import parse_policy
 from jacob.shieldbot import evaluate, ActionRequest
 from jacob.shieldbot import logger as shieldbot_logger
 from jacob.shieldbot import config as shieldbot_config
+from jacob.shieldbot import backboard_client
+from jacob.shieldbot import backboard as shieldbot_backboard
 
 load_dotenv()
 
@@ -944,6 +946,98 @@ async def auth0_status():
 _server_start_time = time.time()
 
 
+# --- Backboard.io Threads & Memory Endpoints ---
+
+@app.get("/shieldclaw/backboard/threads")
+async def backboard_threads(request: Request):
+    """List all Backboard.io threads for this assistant."""
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+    try:
+        threads = backboard_client.list_threads()
+        return JSONResponse(content={"threads": threads})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/shieldclaw/backboard/threads/{thread_id}")
+async def backboard_thread_detail(thread_id: str, request: Request):
+    """Get a Backboard.io thread with all its messages."""
+    payload = await verify_token(request)
+    try:
+        thread = backboard_client.get_thread(thread_id)
+        return JSONResponse(content=thread)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/shieldclaw/backboard/memories")
+async def backboard_memories(request: Request):
+    """List all Backboard.io memories for the Shieldbot assistant."""
+    payload = await verify_token(request)
+    token_scopes = set(payload.get("scope", "").split())
+    if "gateway:admin" not in token_scopes:
+        raise HTTPException(status_code=403, detail="Scope 'gateway:admin' required")
+    try:
+        memories = backboard_client.list_memories()
+        return JSONResponse(content=memories)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.post("/shieldclaw/backboard/chat")
+async def backboard_chat(request: Request):
+    """Chat with Shieldbot via Backboard.io. Creates a thread, sends message, returns response.
+
+    Body: { "message": "I want to export the customer database", "session_id": "optional" }
+    """
+    payload = await verify_token(request)
+    identity = classify_identity(payload)
+    body = await request.json()
+    message = body.get("message", "")
+    session_id = body.get("session_id", f"chat-{identity['sub']}")
+
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    try:
+        thread = shieldbot_backboard.get_or_create_thread(
+            user_id=identity.get("agent_id", identity["sub"]),
+            session_id=session_id,
+        )
+        resp = backboard_client.add_message(
+            thread["thread_id"],
+            message,
+            memory="Auto",
+            send_to_llm="true",
+        )
+        return JSONResponse(content={
+            "response": resp.get("content", ""),
+            "thread_id": thread["thread_id"],
+            "session_id": session_id,
+        })
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/shieldclaw/backboard/status")
+async def backboard_status():
+    """No-auth: Backboard.io connection status and memory stats."""
+    status = {
+        "connected": backboard_client.is_configured(),
+        "base_url": backboard_client.BASE_URL,
+        "assistant_id": backboard_client.ASSISTANT_ID,
+    }
+    try:
+        memories = backboard_client.list_memories()
+        status["memory_count"] = memories.get("total_count", len(memories.get("memories", [])))
+    except Exception as e:
+        status["memory_error"] = str(e)
+    return JSONResponse(content=status)
+
+
 # --- Proxy ---
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
@@ -967,12 +1061,39 @@ async def proxy(request: Request, path: str):
         raise HTTPException(status_code=403, detail=scope_error)
 
     # --- ShieldBot Evaluation (agents only) ---
+    body = await request.body()
     if identity["is_agent"]:
-        body = await request.body()
         action_req = build_action_request(identity, request.method, request_path, body, payload)
         trust_tier = scopes_to_trust_tier(token_scopes)
 
         decision = await asyncio.to_thread(evaluate, action_req, trust_tier)
+
+        # Store decision in Backboard thread for this session
+        try:
+            session_id = payload.get("sub", "unknown")
+            thread = shieldbot_backboard.get_or_create_thread(
+                user_id=identity.get("agent_id", "unknown"),
+                session_id=session_id,
+            )
+            shieldbot_backboard.append_thread_event(
+                thread_id=thread["thread_id"],
+                session_id=session_id,
+                event={
+                    "event_type": "shieldbot_evaluation",
+                    "method": request.method,
+                    "path": request_path,
+                    "action_type": action_req.action_type,
+                    "status": decision.status,
+                    "risk_score": decision.risk_score,
+                    "reason": decision.reason,
+                    "factors": decision.factors,
+                    "trust_tier": trust_tier,
+                    "agent_id": identity.get("agent_id"),
+                    "agent_name": identity.get("agent_name"),
+                },
+            )
+        except Exception:
+            pass
 
         if decision.status in ("blocked", "needs_confirmation"):
             log_request(identity, token_scopes, request.method, request_path, 403)
@@ -997,18 +1118,17 @@ async def proxy(request: Request, path: str):
     upstream_headers.pop("host", None)
 
     # Proxy to OpenClaw gateway
-    body = await request.body()
     upstream_url = f"{OPENCLAW_UPSTREAM}/{path}"
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.request(
-                method=request.method,
+            method=request.method,
                 url=upstream_url,
                 headers=upstream_headers,
-                content=body,
+            content=body,
                 params=request.query_params,
-            )
+        )
     except httpx.ConnectError:
         log_request(identity, token_scopes, request.method, request_path, 502)
         raise HTTPException(status_code=502, detail="OpenClaw gateway unreachable")

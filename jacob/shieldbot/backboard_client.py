@@ -110,6 +110,15 @@ def add_memory(content: str, metadata: dict | None = None) -> dict[str, Any]:
     return resp.json()
 
 
+def submit_tool_outputs(thread_id: str, run_id: str, tool_outputs: list[dict[str, str]]) -> dict[str, Any]:
+    resp = _get_client().post(
+        f"/threads/{thread_id}/runs/{run_id}/submit-tool-outputs",
+        json={"tool_outputs": tool_outputs},
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def get_memory_stats() -> dict[str, Any]:
     resp = _get_client().get(f"/assistants/{ASSISTANT_ID}/memories/stats")
     resp.raise_for_status()
