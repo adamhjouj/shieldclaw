@@ -16,20 +16,16 @@ Usage:
     # Use token in Authorization: Bearer header to call ShieldClaw
 """
 
-import os
 import time
 import logging
 from typing import Optional
 
 import httpx
-from dotenv import load_dotenv
-
-load_dotenv()
 
 logger = logging.getLogger("shieldclaw.agent_token")
 
-AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
-AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
+AUTH0_DOMAIN = "codcodingcode.ca.auth0.com"
+AUTH0_AUDIENCE = "https://shieldclaw-gateway"
 
 
 class AgentTokenClient:

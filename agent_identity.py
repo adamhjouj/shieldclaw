@@ -6,7 +6,6 @@ Each agent gets its own client_id/client_secret via Auth0's Management API,
 so it operates under a distinct identity rather than the developer's personal credentials.
 """
 
-import os
 import json
 import time
 import logging
@@ -15,18 +14,15 @@ from typing import Optional
 from dataclasses import dataclass, asdict
 
 import httpx
-from dotenv import load_dotenv
-
-load_dotenv()
 
 logger = logging.getLogger("shieldclaw.agent_identity")
 
-AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
-AUTH0_MGMT_CLIENT_ID = os.getenv("AUTH0_MGMT_CLIENT_ID", "")
-AUTH0_MGMT_CLIENT_SECRET = os.getenv("AUTH0_MGMT_CLIENT_SECRET", "")
-AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
+AUTH0_DOMAIN = "codcodingcode.ca.auth0.com"
+AUTH0_MGMT_CLIENT_ID = "gM2xYUpQZWMfniipDWt4kRaIHzlNhr0F"
+AUTH0_MGMT_CLIENT_SECRET = "FjqOpCyBYOdkvHmxSP2N4yVBHQi0GIC__eHMEN9pB9MTOs6LBCvG3Irx_u9cj2Zw"
+AUTH0_AUDIENCE = "https://shieldclaw-gateway"
 
-AGENT_REGISTRY_PATH = Path(os.getenv("AGENT_REGISTRY_PATH", "agent_registry.json"))
+AGENT_REGISTRY_PATH = Path("agent_registry.json")
 
 
 @dataclass
@@ -38,6 +34,11 @@ class AgentRegistration:
     scopes: list[str]
     created_at: float
     revoked: bool = False
+    data_access: list[str] = None  # which sensitive data categories this agent can see
+
+    def __post_init__(self):
+        if self.data_access is None:
+            self.data_access = []  # default: agent sees no sensitive data
 
 
 class AgentRegistry:

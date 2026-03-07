@@ -1,27 +1,25 @@
-import os
 import time
 import uuid
 import logging
 from typing import Optional
 
 import httpx
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from jose import jwt, JWTError
 
 from agent_identity import AgentRegistry, AgentRegistration, Auth0ManagementClient
-
-load_dotenv()
+from data_policy import redact_response, get_data_policy_summary, SENSITIVE_PATTERNS
+from policy_parser import parse_policy
 
 # --- Config ---
 
-AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
-AUTH0_CLIENT_ID = os.getenv("AUTH0_CLIENT_ID", "")
-AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
-AUTH0_ALGORITHMS = [os.getenv("AUTH0_ALGORITHMS", "RS256")]
-OPENCLAW_UPSTREAM = os.getenv("OPENCLAW_UPSTREAM", "http://127.0.0.1:18789")
-SHIELDCLAW_PORT = int(os.getenv("SHIELDCLAW_PORT", "8443"))
+AUTH0_DOMAIN = "codcodingcode.ca.auth0.com"
+AUTH0_CLIENT_ID = "b7FYYgwB9iyUYUNi3FGbYuotKAkegQv9"
+AUTH0_AUDIENCE = "https://shieldclaw-gateway"
+AUTH0_ALGORITHMS = ["RS256"]
+OPENCLAW_UPSTREAM = "http://127.0.0.1:18789"
+SHIELDCLAW_PORT = 8443
 
 JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
 ISSUER = f"https://{AUTH0_DOMAIN}/"
@@ -243,10 +241,49 @@ async def register_agent(request: Request):
     body = await request.json()
     agent_name = body.get("agent_name")
     description = body.get("description", f"ShieldClaw agent: {agent_name}")
+    policy_text = body.get("policy")
+    scopes_explicit = "scopes" in body
+    data_access_explicit = "data_access" in body
     scopes = body.get("scopes", ["gateway:read", "gateway:message"])
+    data_access = body.get("data_access", [])
 
     if not agent_name:
         raise HTTPException(status_code=400, detail="agent_name is required")
+
+    # Natural language policy parsing
+    policy_interpretation = None
+    if policy_text:
+        parsed = await parse_policy(policy_text)
+        policy_interpretation = {
+            "original_policy": policy_text,
+            "interpreted_scopes": parsed["scopes"],
+            "interpreted_data_access": parsed["data_access"],
+            "confidence": parsed["confidence"],
+            "reasoning": parsed["reasoning"],
+            "warnings": parsed["warnings"],
+            "override_note": [],
+        }
+        if not scopes_explicit:
+            scopes = parsed["scopes"]
+        else:
+            policy_interpretation["override_note"].append(
+                "scopes: explicit values used instead of parsed"
+            )
+        if not data_access_explicit:
+            data_access = parsed["data_access"]
+        else:
+            policy_interpretation["override_note"].append(
+                "data_access: explicit values used instead of parsed"
+            )
+
+    # Validate data_access categories
+    valid_categories = set(SENSITIVE_PATTERNS.keys())
+    invalid = set(data_access) - valid_categories
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid data_access categories: {invalid}. Valid: {valid_categories}",
+        )
 
     # Create Auth0 M2M application for this agent
     auth0_app = await auth0_mgmt.create_agent_application(agent_name, description, scopes)
@@ -259,19 +296,24 @@ async def register_agent(request: Request):
         owner_sub=identity["sub"],
         scopes=scopes,
         created_at=time.time(),
+        data_access=data_access,
     )
     agent_registry.register(reg)
 
     logger.info(f"Agent registered: {agent_id} ({agent_name}) by {identity['sub']}")
 
-    return {
+    response = {
         "agent_id": agent_id,
         "agent_name": agent_name,
         "client_id": auth0_app["client_id"],
         "client_secret": auth0_app["client_secret"],
         "scopes": scopes,
+        "data_access": data_access,
         "message": "Store the client_secret securely. It cannot be retrieved again.",
     }
+    if policy_interpretation is not None:
+        response["policy_interpretation"] = policy_interpretation
+    return response
 
 
 @app.get("/shieldclaw/agents")
@@ -362,6 +404,34 @@ async def whoami(request: Request):
     return {
         "identity": identity,
         "scopes": sorted(token_scopes),
+    }
+
+
+@app.get("/shieldclaw/data-policy")
+async def data_policy(request: Request):
+    """Show what data categories this identity can see vs what gets redacted."""
+    payload = await verify_token(request)
+    identity = classify_identity(payload)
+
+    if not identity["is_agent"]:
+        return {
+            "identity_type": "human",
+            "message": "Humans see all data — it's your data.",
+            "data_policy": get_data_policy_summary(
+                set(SENSITIVE_PATTERNS.keys())  # all categories visible
+            ),
+        }
+
+    agent_record = agent_registry.get_by_client_id(
+        identity.get("agent_client_id", "")
+    )
+    agent_data_access = set(agent_record.get("data_access", [])) if agent_record else set()
+
+    return {
+        "identity_type": "agent",
+        "agent_name": identity.get("agent_name"),
+        "message": "This agent's responses are filtered. Categories not granted are redacted.",
+        "data_policy": get_data_policy_summary(agent_data_access),
     }
 
 
@@ -582,13 +652,22 @@ async def proxy(request: Request, path: str):
 
     log_request(identity, token_scopes, request.method, request_path, response.status_code)
 
+    # --- Data Isolation: redact sensitive content for agent identities ---
+    response_body = response.content
+    if identity["is_agent"]:
+        agent_record = agent_registry.get_by_client_id(
+            identity.get("agent_client_id", "")
+        )
+        agent_data_access = set(agent_record.get("data_access", [])) if agent_record else set()
+        response_body = redact_response(response_body, identity, agent_data_access)
+
     # Forward response back to client
     excluded_headers = {"transfer-encoding", "content-encoding", "content-length"}
     response_headers = {
         k: v for k, v in response.headers.items() if k.lower() not in excluded_headers
     }
     return StreamingResponse(
-        iter([response.content]),
+        iter([response_body]),
         status_code=response.status_code,
         headers=response_headers,
     )

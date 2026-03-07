@@ -11,11 +11,7 @@ from typing import Any
 
 _memory_store: dict[str, dict[str, Any]] = {}
 
-DEFAULT_PREFERENCES: dict[str, Any] = {
-    "allow_external_sharing": True,
-    "purchase_auto_approve": True,
-    "export_allowed": True,
-}
+DEFAULT_PREFERENCES: dict[str, Any] = {}
 
 
 def get_user_memory(user_id: str) -> dict[str, Any]:

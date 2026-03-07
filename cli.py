@@ -15,21 +15,17 @@ import argparse
 import asyncio
 import json
 import sys
-import os
 
 import httpx
-from dotenv import load_dotenv
 
-load_dotenv()
-
-SHIELDCLAW_URL = os.getenv("SHIELDCLAW_URL", "http://localhost:8443")
-AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
-AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
+SHIELDCLAW_URL = "http://localhost:8443"
+AUTH0_DOMAIN = "codcodingcode.ca.auth0.com"
+AUTH0_AUDIENCE = "https://shieldclaw-gateway"
 
 
 def get_token_from_args(args) -> str:
-    """Get the admin token from --token arg or SHIELDCLAW_ADMIN_TOKEN env var."""
-    token = getattr(args, "token", None) or os.getenv("SHIELDCLAW_ADMIN_TOKEN", "")
+    """Get the admin token from --token arg."""
+    token = getattr(args, "token", None)
     if not token:
         print("Error: Provide --token or set SHIELDCLAW_ADMIN_TOKEN env var", file=sys.stderr)
         sys.exit(1)
@@ -38,17 +34,25 @@ def get_token_from_args(args) -> str:
 
 async def cmd_register(args):
     token = get_token_from_args(args)
-    scopes = [s.strip() for s in args.scopes.split(",")]
+
+    payload = {
+        "agent_name": args.name,
+        "description": args.description or f"Agent: {args.name}",
+    }
+    if args.policy:
+        payload["policy"] = args.policy
+    if args.scopes:
+        payload["scopes"] = [s.strip() for s in args.scopes.split(",")]
+
+    if not args.policy and not args.scopes:
+        print("Error: provide --policy or --scopes (or both)", file=sys.stderr)
+        sys.exit(1)
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{SHIELDCLAW_URL}/shieldclaw/agents",
             headers={"Authorization": f"Bearer {token}"},
-            json={
-                "agent_name": args.name,
-                "description": args.description or f"Agent: {args.name}",
-                "scopes": scopes,
-            },
+            json=payload,
         )
 
     if resp.status_code != 200:
@@ -62,6 +66,15 @@ async def cmd_register(args):
     print(f"  Client ID:     {data['client_id']}")
     print(f"  Client Secret: {data['client_secret']}")
     print(f"  Scopes:        {', '.join(data['scopes'])}")
+
+    if "policy_interpretation" in data:
+        interp = data["policy_interpretation"]
+        print(f"\n  Policy ({interp['confidence']} confidence): {interp['reasoning']}")
+        for w in interp.get("warnings", []):
+            print(f"  WARNING: {w}")
+        for note in interp.get("override_note", []):
+            print(f"  Note: {note}")
+
     print("\n  IMPORTANT: Save the client_secret now. It cannot be retrieved later.")
     print("\n  To get a token for this agent:")
     print(f"    python cli.py get-agent-token --client-id {data['client_id']} --client-secret <secret>")
@@ -184,8 +197,9 @@ def main():
     # register
     p_reg = subparsers.add_parser("register", help="Register a new agent identity")
     p_reg.add_argument("--name", required=True, help="Agent name (e.g. claude-code-dev)")
-    p_reg.add_argument("--scopes", default="gateway:read,gateway:message",
-                       help="Comma-separated scopes (default: gateway:read,gateway:message)")
+    p_reg.add_argument("--policy", help='Plain-English policy (e.g. "read only, no sensitive data")')
+    p_reg.add_argument("--scopes", default=None,
+                       help="Comma-separated scopes; overrides --policy if both provided")
     p_reg.add_argument("--description", help="Agent description")
     p_reg.add_argument("--token", help="Admin JWT (or set SHIELDCLAW_ADMIN_TOKEN)")
 
