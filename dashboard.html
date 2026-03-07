@@ -759,7 +759,7 @@
 </div>
 
 <!-- STATS BAR -->
-<div class="stats-bar">
+<div class="stats-bar" style="grid-template-columns: repeat(6, 1fr)">
   <div class="stat total">
     <div class="stat-label">TOTAL EVALUATIONS</div>
     <div class="stat-value" id="statTotal">—</div>
@@ -775,10 +775,20 @@
     <div class="stat-value" id="statBlocked">—</div>
     <div class="stat-sub" id="statBlockedPct"></div>
   </div>
+  <div class="stat" style="--accent-stat:#f0c000">
+    <div class="stat-label" style="color:var(--text-dim)">PENDING CONFIRM</div>
+    <div class="stat-value" id="statPending" style="color:#f0c000">—</div>
+    <div class="stat-sub" id="statPendingPct"></div>
+  </div>
   <div class="stat risk">
     <div class="stat-label">AVG RISK SCORE</div>
     <div class="stat-value" id="statRisk">—</div>
     <div class="stat-sub">out of 100</div>
+  </div>
+  <div class="stat" style="">
+    <div class="stat-label" style="color:var(--text-dim)">BLOCK RATE</div>
+    <div class="stat-value" id="statBlockRate" style="color:var(--red)">—</div>
+    <div class="stat-sub" id="statBlockRateSub">last 10 evals</div>
   </div>
 </div>
 
@@ -795,6 +805,42 @@
   <div class="chart-panel">
     <div class="chart-label">EVALUATIONS PER MINUTE</div>
     <canvas id="chartVolume" height="90"></canvas>
+  </div>
+</div>
+
+<!-- ANALYTICS PANELS -->
+<div id="analyticsRow" style="display:none;border-bottom:1px solid var(--border);background:var(--bg2)">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid var(--border)">
+
+    <!-- AGENT LEADERBOARD -->
+    <div style="padding:14px 18px;border-right:1px solid var(--border)">
+      <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">AGENT LEADERBOARD</div>
+      <div id="agentLeaderboard" style="font-size:0.75rem;display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+
+    <!-- TOP ACTION TYPES -->
+    <div style="padding:14px 18px;border-right:1px solid var(--border)">
+      <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">TOP ACTION TYPES</div>
+      <div id="actionBreakdown" style="display:flex;flex-direction:column;gap:5px"></div>
+    </div>
+
+    <!-- RISK DISTRIBUTION -->
+    <div style="padding:14px 18px;border-right:1px solid var(--border)">
+      <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">RISK DISTRIBUTION</div>
+      <div id="riskHistogram" style="display:flex;flex-direction:column;gap:4px"></div>
+    </div>
+
+    <!-- TOP RISK FACTORS -->
+    <div style="padding:14px 18px">
+      <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:10px;border-bottom:1px solid var(--border);padding-bottom:6px">TOP RISK FACTORS</div>
+      <div id="topFactors" style="display:flex;flex-direction:column;gap:5px"></div>
+    </div>
+  </div>
+
+  <!-- RECENT BLOCKS FEED -->
+  <div style="padding:12px 18px">
+    <div style="font-size:0.55rem;letter-spacing:0.3em;color:var(--text-dim);margin-bottom:8px">RECENT BLOCKS</div>
+    <div id="recentBlocks" style="display:flex;gap:10px;flex-wrap:wrap"></div>
   </div>
 </div>
 
@@ -894,6 +940,7 @@
   // ── RENDER ────────────────────────────────────────────────────────────
   function renderAll() {
     renderStats();
+    renderAnalytics();
     renderTable();
   }
 
@@ -901,15 +948,24 @@
     const total    = logData.length;
     const approved = logData.filter(r => r.status === 'approved').length;
     const blocked  = logData.filter(r => r.status === 'blocked').length;
+    const pending  = logData.filter(r => r.status === 'needs_confirmation').length;
     const avgRisk  = total ? (logData.reduce((s, r) => s + r.risk_score, 0) / total) : 0;
     const pct      = n => total ? Math.round(n / total * 100) + '%' : '—';
+
+    // Recent block rate (last 10)
+    const last10 = logData.slice(0, 10);
+    const recentBlockRate = last10.length ? Math.round(last10.filter(r => r.status === 'blocked').length / last10.length * 100) : 0;
 
     document.getElementById('statTotal').textContent    = total;
     document.getElementById('statApproved').textContent = approved;
     document.getElementById('statBlocked').textContent  = blocked;
+    document.getElementById('statPending').textContent  = pending;
     document.getElementById('statRisk').textContent     = avgRisk.toFixed(1);
     document.getElementById('statApprovedPct').textContent = pct(approved);
     document.getElementById('statBlockedPct').textContent  = pct(blocked);
+    document.getElementById('statPendingPct').textContent  = pct(pending);
+    document.getElementById('statBlockRate').textContent   = recentBlockRate + '%';
+    document.getElementById('statBlockRateSub').textContent = `last ${last10.length} evals`;
 
     // Threat meter
     const tv = document.getElementById('threatValue');
@@ -917,6 +973,129 @@
     tv.textContent = avgRisk.toFixed(1);
     tv.className   = 'threat-value ' + riskClass(avgRisk);
     ts.textContent = avgRisk < 30 ? 'NOMINAL' : avgRisk < 65 ? 'ELEVATED' : 'CRITICAL';
+  }
+
+  function renderAnalytics() {
+    if (!logData.length) {
+      document.getElementById('analyticsRow').style.display = 'none';
+      return;
+    }
+    document.getElementById('analyticsRow').style.display = '';
+
+    // ── AGENT LEADERBOARD ──
+    const agentMap = {};
+    logData.forEach(r => {
+      const a = r.user_id || r.agent_id || 'unknown';
+      if (!agentMap[a]) agentMap[a] = { total: 0, blocked: 0, risk: 0 };
+      agentMap[a].total++;
+      if (r.status === 'blocked') agentMap[a].blocked++;
+      agentMap[a].risk += r.risk_score;
+    });
+    const agents = Object.entries(agentMap)
+      .map(([name, d]) => ({ name, ...d, avgRisk: d.risk / d.total, blockRate: d.blocked / d.total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
+
+    const maxAgentTotal = agents[0]?.total || 1;
+    document.getElementById('agentLeaderboard').innerHTML = agents.map(a => `
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:var(--text-bright);font-size:0.72rem;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(a.name)}">${esc(a.name)}</span>
+          <span style="font-size:0.65rem;color:var(--text-dim)">${a.total} reqs &nbsp;<span style="color:${a.blockRate > 0.3 ? 'var(--red)' : a.blockRate > 0.1 ? 'var(--amber)' : 'var(--green)'}">${Math.round(a.blockRate * 100)}% blocked</span></span>
+        </div>
+        <div style="height:4px;background:var(--bg3);border:1px solid var(--border);position:relative">
+          <div style="height:100%;width:${(a.total/maxAgentTotal*100).toFixed(1)}%;background:${riskColor(a.avgRisk)};opacity:0.7"></div>
+        </div>
+      </div>
+    `).join('');
+
+    // ── TOP ACTION TYPES ──
+    const actionMap = {};
+    logData.forEach(r => {
+      const k = r.action_type || 'unknown';
+      if (!actionMap[k]) actionMap[k] = { total: 0, blocked: 0 };
+      actionMap[k].total++;
+      if (r.status === 'blocked') actionMap[k].blocked++;
+    });
+    const actions = Object.entries(actionMap)
+      .sort((a, b) => b[1].total - a[1].total)
+      .slice(0, 7);
+    const maxAction = actions[0]?.[1].total || 1;
+
+    document.getElementById('actionBreakdown').innerHTML = actions.map(([name, d]) => `
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="display:flex;justify-content:space-between">
+          <span style="color:var(--accent);font-size:0.7rem">${esc(name)}</span>
+          <span style="color:var(--text-dim);font-size:0.65rem">${d.total} &nbsp;<span style="color:var(--red)">${d.blocked > 0 ? d.blocked + ' blocked' : ''}</span></span>
+        </div>
+        <div style="height:3px;background:var(--bg3);border:1px solid var(--border)">
+          <div style="height:100%;display:flex">
+            <div style="width:${((d.total - d.blocked)/maxAction*100).toFixed(1)}%;background:rgba(0,212,106,0.5)"></div>
+            <div style="width:${(d.blocked/maxAction*100).toFixed(1)}%;background:rgba(255,59,92,0.6)"></div>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    // ── RISK DISTRIBUTION HISTOGRAM ──
+    const buckets = [
+      { label: '0–20',  min: 0,  max: 20,  color: 'var(--green)',  count: 0 },
+      { label: '21–40', min: 21, max: 40,  color: '#7adf8a',       count: 0 },
+      { label: '41–60', min: 41, max: 60,  color: 'var(--amber)',  count: 0 },
+      { label: '61–80', min: 61, max: 80,  color: '#ff8040',       count: 0 },
+      { label: '81–100',min: 81, max: 100, color: 'var(--red)',    count: 0 },
+    ];
+    logData.forEach(r => {
+      const b = buckets.find(b => r.risk_score <= b.max);
+      if (b) b.count++;
+    });
+    const maxBucket = Math.max(...buckets.map(b => b.count), 1);
+    document.getElementById('riskHistogram').innerHTML = buckets.map(b => `
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:0.65rem;color:var(--text-dim);width:42px;flex-shrink:0">${b.label}</span>
+        <div style="flex:1;height:12px;background:var(--bg3);border:1px solid var(--border);position:relative">
+          <div style="height:100%;width:${(b.count/maxBucket*100).toFixed(1)}%;background:${b.color};opacity:0.75;transition:width 0.4s"></div>
+        </div>
+        <span style="font-size:0.65rem;color:${b.color};width:20px;text-align:right">${b.count}</span>
+      </div>
+    `).join('');
+
+    // ── TOP RISK FACTORS ──
+    const factorMap = {};
+    logData.forEach(r => {
+      (r.factors || []).forEach(f => {
+        factorMap[f] = (factorMap[f] || 0) + 1;
+      });
+    });
+    const topFactors = Object.entries(factorMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+    const maxFactor = topFactors[0]?.[1] || 1;
+
+    document.getElementById('topFactors').innerHTML = topFactors.length
+      ? topFactors.map(([name, count]) => `
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:10px;background:var(--bg3);border:1px solid var(--border);position:relative">
+            <div style="height:100%;width:${(count/maxFactor*100).toFixed(1)}%;background:rgba(240,165,0,0.5)"></div>
+          </div>
+          <span style="font-size:0.65rem;color:var(--amber);flex:0 0 auto;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}</span>
+          <span style="font-size:0.65rem;color:var(--text-dim);width:18px;text-align:right">${count}</span>
+        </div>
+      `).join('')
+      : '<span style="font-size:0.72rem;color:var(--text-dim)">no risk factors recorded</span>';
+
+    // ── RECENT BLOCKS FEED ──
+    const blocks = logData.filter(r => r.status === 'blocked').slice(0, 8);
+    document.getElementById('recentBlocks').innerHTML = blocks.length
+      ? blocks.map(r => {
+          const t = new Date(r.timestamp).toLocaleTimeString('en-US', { hour12: false });
+          return `<div style="border:1px solid var(--red-dim);background:rgba(255,59,92,0.05);padding:6px 10px;font-size:0.68rem;max-width:220px">
+            <div style="color:var(--red);margin-bottom:2px">${esc(r.action_type)} &nbsp;<span style="color:var(--text-dim)">${t}</span></div>
+            <div style="color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.reason)}">${esc(r.reason || '—')}</div>
+            <div style="color:var(--amber);margin-top:2px">risk ${Math.round(r.risk_score)}/100</div>
+          </div>`;
+        }).join('')
+      : '<span style="font-size:0.72rem;color:var(--text-dim)">no blocks yet</span>';
   }
 
   function riskClass(score) {

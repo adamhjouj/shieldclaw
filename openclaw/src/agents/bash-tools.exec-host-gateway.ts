@@ -10,6 +10,7 @@ import {
   requiresExecApproval,
   resolveAllowAlwaysPatterns,
 } from "../infra/exec-approvals.js";
+import { classifyExecCommand, type ClassifierContext } from "../infra/backboard-exec-classifier.js";
 import { detectCommandObfuscation } from "../infra/exec-obfuscation-detect.js";
 import type { SafeBinProfile } from "../infra/exec-safe-bin-policy.js";
 import { logInfo } from "../logger.js";
@@ -57,6 +58,8 @@ export type ProcessGatewayAllowlistParams = {
   maxOutput: number;
   pendingMaxOutput: number;
   trustedSafeBinDirs?: ReadonlySet<string>;
+  /** Optional conversation context for the exec classifier. */
+  classifierContext?: ClassifierContext;
 };
 
 export type ProcessGatewayAllowlistResult = {
@@ -319,7 +322,16 @@ export async function processGatewayAllowlist(
   }
 
   if (hostSecurity === "allowlist" && (!analysisOk || !allowlistSatisfied)) {
-    throw new Error("exec denied: allowlist miss");
+    // Ask Backboard/Gemini to classify before hard-denying — pass full context so
+    // the model can make an intent-aware decision, not just rule-match on the command string.
+    const classification = await classifyExecCommand(params.command, params.workdir, params.classifierContext);
+    logInfo(
+      `exec: backboard classifier decision=${classification.decision} reason="${classification.reason}" command=${params.command}`,
+    );
+    if (classification.decision === "deny") {
+      throw new Error(`exec denied: allowlist miss (backboard: ${classification.reason})`);
+    }
+    // Classifier approved — fall through to execute without allowlist enforcement.
   }
 
   recordMatchedAllowlistUse(allowlistEval.segments[0]?.resolution?.resolvedPath);

@@ -24,12 +24,11 @@ EvalMode = Literal["think", "fast"]
 # Backboard unified API
 # ---------------------------------------------------------------------------
 BACKBOARD_BASE_URL = "https://app.backboard.io/api"
-BACKBOARD_API_KEY = "espr_1P8bkDh37cEOjxcvPDAakA56LMGyTS1IshSJOfO9ba4"
+BACKBOARD_API_KEY = "espr_Lr3IM1sZUkbCK3IOGBsKRpM_o55-y3G67mqXBb_rAA4"
 
 # Model identifiers as routed through Backboard
-# Backboard accepts provider-prefixed model IDs (same format as OpenRouter)
-BACKBOARD_THINK_MODEL = "anthropic/claude-sonnet-4-6"
-BACKBOARD_FAST_MODEL = "anthropic/claude-haiku-4-5-20251001"
+BACKBOARD_THINK_MODEL = "claude-sonnet-4-6"
+BACKBOARD_FAST_MODEL = "claude-haiku-4-5-20251001"
 
 # ---------------------------------------------------------------------------
 # Runtime config store

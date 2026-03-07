@@ -1,77 +1,100 @@
-"""Backboard.io API client — real integration.
+"""Backboard.io client — per-user assistants with native memory.
 
-API docs: https://docs.backboard.io
-Base URL: https://app.backboard.io/api
-Auth: X-API-Key header
+One Backboard assistant is created per Discord user ID. memory="Auto" on every
+message means Backboard automatically extracts, stores, and injects memories —
+no manual SQLite reads/writes needed.
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
+import concurrent.futures
 from typing import Any
 
-import httpx
+from backboard import BackboardClient
 
-API_KEY = "espr_JwYIxHoAqAcO9Y775yV5fxggdeNqUYRCapmc4bHb460"
-BASE_URL = "https://app.backboard.io/api"
-ASSISTANT_ID = "1cd289f2-0a4b-4974-b486-46b4c735c1e5"
+API_KEY = "espr_Lr3IM1sZUkbCK3IOGBsKRpM_o55-y3G67mqXBb_rAA4"
+ASSISTANT_ID = "1cd289f2-0a4b-4974-b486-46b4c735c1e5"  # default/shared fallback
 
-_client: httpx.Client | None = None
+_client: BackboardClient | None = None
+
+# Cache: user_id -> assistant_id
+_user_assistants: dict[str, str] = {}
 
 
-def _get_client() -> httpx.Client:
+def _get_client() -> BackboardClient:
     global _client
     if _client is None:
-        _client = httpx.Client(
-            base_url=BASE_URL,
-            headers={"X-API-Key": API_KEY},
-            timeout=30.0,
-        )
+        _client = BackboardClient(api_key=API_KEY)
     return _client
+
+
+def _run(coro) -> Any:
+    """Run an async coroutine from sync context.
+
+    Runs in a dedicated background thread with its own event loop so we never
+    interfere with uvicorn's loop (which nest_asyncio would break).
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 def is_configured() -> bool:
     return bool(API_KEY)
 
 
-# ── Assistants ──
+# ── Per-user assistants ──
 
-def create_assistant(name: str, system_prompt: str) -> dict[str, Any]:
-    resp = _get_client().post("/assistants", json={
-        "name": name,
-        "system_prompt": system_prompt,
-    })
-    resp.raise_for_status()
-    return resp.json()
+async def _get_or_create_user_assistant(user_id: str) -> str:
+    """Get or create a Backboard assistant for this user. Cached in memory."""
+    if user_id in _user_assistants:
+        return _user_assistants[user_id]
+
+    client = _get_client()
+    assistant = await client.create_assistant(
+        name=f"shieldbot-user-{user_id}",
+        system_prompt=(
+            "You are ShieldBot's memory layer for a specific user. "
+            "Remember their approval/denial history, preferences, and behavioral patterns "
+            "to help evaluate future AI agent actions."
+        ),
+    )
+    _user_assistants[user_id] = assistant.assistant_id
+    return assistant.assistant_id
 
 
-def list_assistants() -> list[dict[str, Any]]:
-    resp = _get_client().get("/assistants")
-    resp.raise_for_status()
-    return resp.json()
+def get_or_create_user_assistant(user_id: str) -> str:
+    return _run(_get_or_create_user_assistant(user_id))
 
 
 # ── Threads ──
 
-def create_thread() -> dict[str, Any]:
-    resp = _get_client().post(f"/assistants/{ASSISTANT_ID}/threads", json={})
-    resp.raise_for_status()
-    return resp.json()
+async def _create_thread(assistant_id: str) -> dict[str, Any]:
+    client = _get_client()
+    thread = await client.create_thread(assistant_id)
+    return {"thread_id": thread.thread_id}
 
 
-def get_thread(thread_id: str) -> dict[str, Any]:
-    resp = _get_client().get(f"/threads/{thread_id}")
-    resp.raise_for_status()
-    return resp.json()
+def create_thread(user_id: str | None = None) -> dict[str, Any]:
+    if user_id:
+        assistant_id = get_or_create_user_assistant(user_id)
+    else:
+        assistant_id = ASSISTANT_ID
+    return _run(_create_thread(assistant_id))
 
 
-def list_threads() -> list[dict[str, Any]]:
-    resp = _get_client().get(f"/assistants/{ASSISTANT_ID}/threads")
-    resp.raise_for_status()
-    return resp.json()
+# ── Messages with native memory ──
 
+async def _add_message(thread_id: str, content: str, memory: str, send_to_llm: bool) -> dict[str, Any]:
+    client = _get_client()
+    response = await client.add_message(
+        thread_id=thread_id,
+        content=content,
+        memory=memory,
+        stream=False,
+    )
+    return {"content": getattr(response, "content", ""), "raw": response}
 
-# ── Messages ──
 
 def add_message(
     thread_id: str,
@@ -80,53 +103,54 @@ def add_message(
     memory: str = "Auto",
     send_to_llm: str = "false",
 ) -> dict[str, Any]:
-    resp = _get_client().post(
-        f"/threads/{thread_id}/messages",
-        data={
-            "content": content,
-            "stream": "false",
-            "memory": memory,
-            "send_to_llm": send_to_llm,
-        },
-    )
-    resp.raise_for_status()
-    return resp.json()
+    return _run(_add_message(thread_id, content, memory, send_to_llm == "true"))
 
 
 # ── Memories ──
 
-def list_memories() -> dict[str, Any]:
-    resp = _get_client().get(f"/assistants/{ASSISTANT_ID}/memories")
-    resp.raise_for_status()
-    return resp.json()
+async def _list_memories(assistant_id: str) -> dict[str, Any]:
+    client = _get_client()
+    result = await client.list_memories(assistant_id)
+    return result if isinstance(result, dict) else {"memories": result}
 
 
-def add_memory(content: str, metadata: dict | None = None) -> dict[str, Any]:
-    body: dict[str, Any] = {"content": content}
-    if metadata:
-        body["metadata"] = metadata
-    resp = _get_client().post(f"/assistants/{ASSISTANT_ID}/memories", json=body)
-    resp.raise_for_status()
-    return resp.json()
+def list_memories(user_id: str | None = None) -> dict[str, Any]:
+    assistant_id = _user_assistants.get(user_id or "", ASSISTANT_ID)
+    return _run(_list_memories(assistant_id))
 
 
-def submit_tool_outputs(thread_id: str, run_id: str, tool_outputs: list[dict[str, str]]) -> dict[str, Any]:
-    resp = _get_client().post(
-        f"/threads/{thread_id}/runs/{run_id}/submit-tool-outputs",
-        json={"tool_outputs": tool_outputs},
-    )
-    resp.raise_for_status()
-    return resp.json()
+async def _add_memory_direct(assistant_id: str, content: str, metadata: dict | None) -> dict[str, Any]:
+    client = _get_client()
+    result = await client.add_memory(assistant_id=assistant_id, content=content)
+    return result if isinstance(result, dict) else {"status": "ok"}
 
 
-def get_memory_stats() -> dict[str, Any]:
-    resp = _get_client().get(f"/assistants/{ASSISTANT_ID}/memories/stats")
-    resp.raise_for_status()
-    return resp.json()
+def add_memory(content: str, metadata: dict | None = None, user_id: str | None = None) -> dict[str, Any]:
+    assistant_id = _user_assistants.get(user_id or "", ASSISTANT_ID)
+    return _run(_add_memory_direct(assistant_id, content, metadata))
+
+
+def get_thread(thread_id: str) -> dict[str, Any]:
+    async def _get():
+        client = _get_client()
+        result = await client.get_thread(thread_id)
+        return result if isinstance(result, dict) else {"thread_id": thread_id}
+    return _run(_get())
+
+
+def list_threads(user_id: str | None = None) -> list[dict[str, Any]]:
+    async def _list():
+        assistant_id = _user_assistants.get(user_id or "", ASSISTANT_ID)
+        client = _get_client()
+        result = await client.list_threads(assistant_id)
+        return result if isinstance(result, list) else []
+    return _run(_list())
+
+
+def get_memory_stats(user_id: str | None = None) -> dict[str, Any]:
+    return {"user_id": user_id, "assistants_cached": len(_user_assistants)}
 
 
 def close() -> None:
     global _client
-    if _client is not None:
-        _client.close()
-        _client = None
+    _client = None

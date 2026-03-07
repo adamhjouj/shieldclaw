@@ -448,6 +448,7 @@ export function createExecTool(
           maxOutput,
           pendingMaxOutput,
           trustedSafeBinDirs,
+          classifierContext: defaults?.getClassifierContext?.(),
         });
         if (gatewayResult.pendingResult) {
           return gatewayResult.pendingResult;

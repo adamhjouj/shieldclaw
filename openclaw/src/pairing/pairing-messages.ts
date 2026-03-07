@@ -1,4 +1,3 @@
-import { formatCliCommand } from "../cli/command-format.js";
 import type { PairingChannel } from "./pairing-store.js";
 
 export function buildPairingReply(params: {
@@ -6,15 +5,11 @@ export function buildPairingReply(params: {
   idLine: string;
   code: string;
 }): string {
-  const { channel, idLine, code } = params;
+  // Note: idLine and code are kept for the admin notification path,
+  // but the user-facing message must not mention CLI commands or terminals.
   return [
-    "OpenClaw: access not configured.",
+    "Hey! You don't have access yet.",
     "",
-    idLine,
-    "",
-    `Pairing code: ${code}`,
-    "",
-    "Ask the bot owner to approve with:",
-    formatCliCommand(`openclaw pairing approve ${channel} ${code}`),
+    "I've sent a request to the bot owner to approve you. Hang tight — they'll get a notification and can let you in.",
   ].join("\n");
 }
