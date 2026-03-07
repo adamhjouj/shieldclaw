@@ -18,7 +18,7 @@ import anthropic
 import httpx
 
 from .types import ActionRequest, Decision
-from . import thread_manager, memory, logger, config
+from . import thread_manager, memory, logger, config, backboard_client
 from .trace import DecisionTrace, build_decision_trace
 from .capture import (
     OpenClawInput,
@@ -27,6 +27,7 @@ from .capture import (
     capture_openclaw_input,
     capture_openclaw_output,
 )
+from . import backboard
 
 _trace_log: list[dict] = []
 
@@ -81,14 +82,7 @@ def _build_system_prompt(trust_tier: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _call_via_backboard(eval_mode: str, system: str, user_message: str) -> tuple[str, str | None]:
-    """
-    Route through Backboard's unified API.
-    Returns (raw_json_text, thinking_text_or_None).
-
-    Backboard exposes a REST messages endpoint that mirrors Anthropic's format.
-    We send the request with the appropriate model ID and, for "think" mode,
-    include the extended_thinking parameter.
-    """
+    """Route through Backboard's unified API."""
     model = config.BACKBOARD_THINK_MODEL if eval_mode == "think" else config.BACKBOARD_FAST_MODEL
 
     body: dict = {
@@ -129,7 +123,7 @@ def _call_via_backboard(eval_mode: str, system: str, user_message: str) -> tuple
 
 
 def _call_direct_anthropic(eval_mode: str, system: str, user_message: str) -> tuple[str, str | None]:
-    """Fallback: call Anthropic directly (original behaviour)."""
+    """Fallback: call Anthropic directly."""
     thinking_text = None
 
     if eval_mode == "think":
@@ -170,25 +164,21 @@ def _call_llm(eval_mode: str, system: str, user_message: str) -> tuple[str, str 
 # ---------------------------------------------------------------------------
 
 def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
-    # 1. Thread context
     thread = thread_manager.get_or_create_thread(request.session_id, request.user_id)
     thread_id = thread["thread_id"]
 
-    # 2. Auto-degrade trust tier if agent has been blocked repeatedly this session
     effective_tier = _effective_trust_tier(trust_tier, thread)
 
-    # 3. User memory & preferences
     user_mem = memory.get_user_memory(request.user_id)
     merged_prefs = {**user_mem["preferences"], **request.user_preferences}
 
-    # 4. Build the prompt for Claude
     user_message = _build_prompt(request, merged_prefs, user_mem)
+    system_prompt = _build_system_prompt(effective_tier)
 
-    # 5. Call LLM — routed through Backboard or direct Anthropic
     eval_mode = config.get_eval_mode()
     thinking_text = None
     try:
-        raw, thinking_text = _call_llm(eval_mode, _build_system_prompt(effective_tier), user_message)
+        raw, thinking_text = _call_llm(eval_mode, system_prompt, user_message)
         parsed = json.loads(raw)
         decision = Decision(
             status=parsed["status"],
@@ -206,10 +196,8 @@ def evaluate(request: ActionRequest, trust_tier: str = "medium") -> Decision:
             thread_id=thread_id,
         )
 
-    # 6. Audit log (also ships to Backboard analytics)
     logger.log_decision(request, decision, effective_tier, thinking=thinking_text)
 
-    # 7. Update thread and user memory
     thread_manager.append_to_thread(request.session_id, {
         "action_type": request.action_type,
         "status": decision.status,
@@ -229,7 +217,6 @@ _TIER_ORDER = ["high", "medium", "low"]
 
 
 def _effective_trust_tier(base_tier: str, thread: dict) -> str:
-    """Degrade trust tier by one level if the agent has 3+ blocks in this session."""
     recent_blocks = sum(
         1 for h in thread.get("history", []) if h.get("status") == "blocked"
     )
@@ -283,7 +270,7 @@ def evaluate_shieldbot_request(
 
     1. Captures the OpenClaw input (user request + parsed action)
     2. Captures the OpenClaw output (proposed action)
-    3. Evaluates via Claude
+    3. Evaluates via LLM (Backboard or Anthropic)
     4. Builds a structured decision trace
     5. Returns (decision, trace, interaction_record)
     """
@@ -337,8 +324,32 @@ def evaluate_shieldbot_request(
         thread_id=decision.thread_id or "",
     )
 
+    backboard.log_decision_trace(decision.thread_id or "", session_id, trace)
+    backboard.record_interaction(session_id, record)
     _trace_log.append(trace.to_dict())
+
     return decision, trace, record
+
+
+def record_openclaw_interaction(
+    oc_input: OpenClawInput,
+    oc_output: OpenClawOutput,
+    decision: Decision,
+    session_id: str,
+) -> InteractionRecord:
+    """Record an already-evaluated interaction into the Backboard thread."""
+    record = InteractionRecord(
+        openclaw_input=oc_input,
+        openclaw_output=oc_output,
+        shieldbot_decision=decision.status,
+        shieldbot_reason=decision.reason,
+        risk_score=decision.risk_score,
+        risk_factors=decision.factors,
+        trace_id="manual",
+        thread_id=decision.thread_id or "",
+    )
+    backboard.record_interaction(session_id, record)
+    return record
 
 
 def get_trace_log() -> list[dict]:
