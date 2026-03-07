@@ -23,11 +23,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 import asyncio
 import discord
 
-DISCORD_TOKEN = (
-    os.environ.get("DISCORD_BOT_TOKEN")
-    or os.environ.get("DISCORD_TOKEN")
-    or "MTQ3OTY2OTEwMzM3MDQzNjY4OQ.GBBNwL.d8anHBXsSImR1rQyvtsXB1bHB0BbIy24mHmTD4"
-)
+DISCORD_TOKEN = os.environ.get("DISCORD_BOT_TOKEN") or os.environ.get("DISCORD_TOKEN", "")
 _admin_id_raw = os.environ.get("DISCORD_ADMIN_USER_ID", "").strip()
 DISCORD_ADMIN_USER_ID: int | None = int(_admin_id_raw) if _admin_id_raw.isdigit() else None
 
@@ -52,8 +48,8 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 
-# Per-channel conversation history (in-memory, resets on restart)
-_channel_history: dict[int, list[dict]] = {}
+# Per-user conversation history (in-memory, resets on restart)
+_user_history: dict[int, list[dict]] = {}
 
 MENTION_PATTERN = re.compile(r"<@!?\d+>")
 
@@ -157,7 +153,7 @@ async def _poll_approvals():
     """Background task: poll ShieldClaw for pending high-risk approvals and DM admin."""
     await client.wait_until_ready()
     while not client.is_closed():
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(5)
         if not DISCORD_ADMIN_USER_ID:
             continue
         try:
@@ -219,7 +215,7 @@ async def _chat(
     guild_id: int = 0,
 ) -> str:
     """Send a message to OpenClaw via ShieldClaw and return the reply."""
-    history = _channel_history.setdefault(channel_id, [])
+    history = _user_history.setdefault(discord_user_id or channel_id, [])
     history.append({"role": "user", "content": user_message})
 
     ltm_headers: dict[str, str] = {
@@ -245,7 +241,7 @@ async def _chat(
     history.append({"role": "assistant", "content": reply})
 
     if len(history) > 40:
-        _channel_history[channel_id] = history[-40:]
+        _user_history[discord_user_id or channel_id] = history[-40:]
 
     return reply
 
@@ -343,7 +339,7 @@ async def on_message(message: discord.Message):
         return
 
     if content.strip().lower() in ("/clear", "!clear"):
-        _channel_history.pop(message.channel.id, None)
+        _user_history.pop(message.author.id, None)
         # Also wipe ShieldBot session so trust tier resets
         try:
             async with httpx.AsyncClient(timeout=5.0) as c:

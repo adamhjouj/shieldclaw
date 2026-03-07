@@ -1,11 +1,13 @@
 import asyncio
 import json
 import os
+import secrets
 import sys
 import time
 import uuid
 import logging
 import sqlite3
+import urllib.parse
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
@@ -86,6 +88,7 @@ _maybe_register_and_exit()
 
 AUTH0_DOMAIN = vault.get("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
 AUTH0_CLIENT_ID = vault.get("AUTH0_CLIENT_ID")
+AUTH0_CLIENT_SECRET = vault.get("AUTH0_CLIENT_SECRET", "")
 AUTH0_AUDIENCE = vault.get("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
 AUTH0_ALGORITHMS = ["RS256"]
 OPENCLAW_UPSTREAM = vault.get("OPENCLAW_UPSTREAM", "http://127.0.0.1:18789")
@@ -94,6 +97,12 @@ SHIELDCLAW_PORT = int(vault.get("SHIELDCLAW_PORT", "8443"))
 
 JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
 ISSUER = f"https://{AUTH0_DOMAIN}/"
+
+# ---------------------------------------------------------------------------
+# Discord ↔ Auth0 token store
+# Maps Discord user ID → {"access_token": str, "expires_at": float, "sub": str}
+# ---------------------------------------------------------------------------
+_discord_auth0_tokens: dict[str, dict] = {}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("shieldclaw")
@@ -221,12 +230,19 @@ async def verify_token(request: Request) -> dict:
     auth_header = request.headers.get("Authorization", "")
 
     # Dev bypass: accept any Bearer dev-* token without hitting Auth0
+    # When X-Discord-User-Id is present, mint a per-user identity so each
+    # Discord user gets their own Auth0-style sub, session, and audit trail.
     if DEV_BYPASS and auth_header == f"Bearer {_DEV_TOKEN}":
+        discord_uid = request.headers.get("X-Discord-User-Id", "")
+        if discord_uid:
+            client_id = f"discord-{discord_uid}"
+        else:
+            client_id = _DEV_AGENT["auth0_client_id"]
         scopes = " ".join(_DEV_AGENT["scopes"])
         return {
-            "sub": f"{_DEV_AGENT['auth0_client_id']}@clients",
+            "sub": f"{client_id}@clients",
             "gty": "client-credentials",
-            "azp": _DEV_AGENT["auth0_client_id"],
+            "azp": client_id,
             "scope": scopes,
             "iat": int(time.time()),
             "exp": int(time.time()) + 86400,
@@ -313,11 +329,15 @@ def classify_identity(payload: dict) -> dict:
         identity["agent_client_id"] = client_id
 
         # Dev bypass: inject the fake agent record directly, skip registry lookup
-        if DEV_BYPASS and client_id == _DEV_AGENT["auth0_client_id"]:
+        if DEV_BYPASS and (
+            client_id == _DEV_AGENT["auth0_client_id"]
+            or client_id.startswith("discord-")
+        ):
             _DEV_AGENT["data_access"] = list(SENSITIVE_PATTERNS.keys())
-            identity["agent_id"] = _DEV_AGENT["agent_id"]
-            identity["agent_name"] = _DEV_AGENT["agent_name"]
-            identity["owner_sub"] = _DEV_AGENT["owner_sub"]
+            discord_uid = client_id.removeprefix("discord-") if client_id.startswith("discord-") else ""
+            identity["agent_id"] = f"agent_{discord_uid}" if discord_uid else _DEV_AGENT["agent_id"]
+            identity["agent_name"] = f"discord-user-{discord_uid}" if discord_uid else _DEV_AGENT["agent_name"]
+            identity["owner_sub"] = f"discord:{discord_uid}" if discord_uid else _DEV_AGENT["owner_sub"]
             return identity
 
         # Look up agent in registry for metadata
@@ -555,7 +575,7 @@ async def data_policy(request: Request):
         }
 
     _client_id = identity.get("agent_client_id", "")
-    if DEV_BYPASS and _client_id == _DEV_AGENT["auth0_client_id"]:
+    if DEV_BYPASS and (_client_id == _DEV_AGENT["auth0_client_id"] or _client_id.startswith("discord-")):
         agent_data_access = set(SENSITIVE_PATTERNS.keys())
     else:
         agent_record = agent_registry.get_by_client_id(_client_id)
@@ -927,6 +947,129 @@ async def clear_session(request: Request):
     if session_id:
         _tm.clear_session(session_id)
     return JSONResponse(content={"ok": True})
+
+
+# --- Auth0 OAuth flow for Discord users ---
+
+# Pending OAuth states: state_nonce → {"discord_user_id": str, "created_at": float}
+_oauth_pending: dict[str, dict] = {}
+
+
+@app.get("/shieldclaw/auth/discord/login")
+async def discord_auth0_login(discord_user_id: str):
+    """Generate an Auth0 login URL for a Discord user.
+
+    The Discord bot redirects users here. Auth0 Universal Login handles
+    the actual authentication, then redirects back to our callback.
+    """
+    if not AUTH0_CLIENT_ID or not AUTH0_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Auth0 client credentials not configured")
+
+    state = secrets.token_urlsafe(32)
+    _oauth_pending[state] = {
+        "discord_user_id": discord_user_id,
+        "created_at": time.time(),
+    }
+
+    # Clean up stale pending states (older than 10 minutes)
+    cutoff = time.time() - 600
+    stale = [k for k, v in _oauth_pending.items() if v["created_at"] < cutoff]
+    for k in stale:
+        _oauth_pending.pop(k, None)
+
+    callback_url = f"http://localhost:{SHIELDCLAW_PORT}/shieldclaw/auth/discord/callback"
+    params = urllib.parse.urlencode({
+        "response_type": "code",
+        "client_id": AUTH0_CLIENT_ID,
+        "redirect_uri": callback_url,
+        "scope": "openid profile email",
+        "audience": AUTH0_AUDIENCE,
+        "state": state,
+    })
+    auth_url = f"https://{AUTH0_DOMAIN}/authorize?{params}"
+
+    return JSONResponse(content={"login_url": auth_url})
+
+
+@app.get("/shieldclaw/auth/discord/callback", response_class=HTMLResponse)
+async def discord_auth0_callback(code: str = "", state: str = "", error: str = ""):
+    """Auth0 redirects here after the user logs in."""
+    if error:
+        return HTMLResponse(content=f"<h2>Login failed</h2><p>{error}</p>", status_code=400)
+
+    pending = _oauth_pending.pop(state, None)
+    if not pending:
+        return HTMLResponse(content="<h2>Invalid or expired login link</h2><p>Please try again from Discord.</p>", status_code=400)
+
+    discord_user_id = pending["discord_user_id"]
+    callback_url = f"http://localhost:{SHIELDCLAW_PORT}/shieldclaw/auth/discord/callback"
+
+    # Exchange authorization code for tokens
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            resp = await c.post(
+                f"https://{AUTH0_DOMAIN}/oauth/token",
+                json={
+                    "grant_type": "authorization_code",
+                    "client_id": AUTH0_CLIENT_ID,
+                    "client_secret": AUTH0_CLIENT_SECRET,
+                    "code": code,
+                    "redirect_uri": callback_url,
+                },
+            )
+            resp.raise_for_status()
+            token_data = resp.json()
+    except Exception as e:
+        logger.error(f"Auth0 token exchange failed for discord user {discord_user_id}: {e}")
+        return HTMLResponse(content=f"<h2>Login failed</h2><p>Token exchange error: {e}</p>", status_code=500)
+
+    access_token = token_data.get("access_token", "")
+    expires_in = token_data.get("expires_in", 86400)
+
+    # Decode the access token to get the sub (no verification needed here —
+    # we just got it directly from Auth0's token endpoint over HTTPS)
+    try:
+        unverified = jwt.get_unverified_claims(access_token)
+        sub = unverified.get("sub", "unknown")
+    except Exception:
+        sub = "unknown"
+
+    _discord_auth0_tokens[discord_user_id] = {
+        "access_token": access_token,
+        "expires_at": time.time() + expires_in,
+        "sub": sub,
+    }
+
+    _record_debug_event("discord_auth0_login", {
+        "discord_user_id": discord_user_id,
+        "sub": sub,
+        "expires_in": expires_in,
+    })
+    logger.info(f"Discord user {discord_user_id} authenticated via Auth0 as {sub}")
+
+    return HTMLResponse(content=(
+        "<h2>Authenticated!</h2>"
+        "<p>You can close this tab and go back to Discord.</p>"
+        f"<p>Logged in as: <code>{sub}</code></p>"
+    ))
+
+
+@app.get("/shieldclaw/auth/discord/token/{discord_user_id}")
+async def discord_auth0_get_token(discord_user_id: str, request: Request):
+    """Internal endpoint: Discord bot fetches a user's stored Auth0 token."""
+    _check_internal_token(request)
+    stored = _discord_auth0_tokens.get(discord_user_id)
+    if not stored:
+        return JSONResponse(content={"authenticated": False})
+    if stored["expires_at"] < time.time():
+        _discord_auth0_tokens.pop(discord_user_id, None)
+        return JSONResponse(content={"authenticated": False, "reason": "expired"})
+    return JSONResponse(content={
+        "authenticated": True,
+        "access_token": stored["access_token"],
+        "sub": stored["sub"],
+        "expires_at": stored["expires_at"],
+    })
 
 
 # --- Auth0 Debug Dashboard ---
@@ -1433,7 +1576,7 @@ class BackboardInterpreter:
         """Parse tool calls from Backboard response (OpenAI Assistants format)."""
         calls: list[dict] = []
 
-        for tc in response_data.get("tool_calls", []):
+        for tc in (response_data.get("tool_calls") or []):
             fn = tc.get("function", {})
             name = fn.get("name", tc.get("name", ""))
             raw_args = fn.get("arguments", tc.get("arguments", "{}"))
@@ -1444,8 +1587,8 @@ class BackboardInterpreter:
                 "arguments": args,
             })
 
-        ra = response_data.get("required_action", {})
-        for tc in ra.get("submit_tool_outputs", {}).get("tool_calls", []):
+        ra = response_data.get("required_action") or {}
+        for tc in (ra.get("submit_tool_outputs") or {}).get("tool_calls") or []:
             fn = tc.get("function", {})
             raw_args = fn.get("arguments", "{}")
             args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
@@ -2009,7 +2152,7 @@ async def proxy(request: Request, path: str):
     # --- Data Isolation: redact sensitive content for agent identities ---
     if identity["is_agent"]:
         _cid = identity.get("agent_client_id", "")
-        if DEV_BYPASS and _cid == _DEV_AGENT["auth0_client_id"]:
+        if DEV_BYPASS and (_cid == _DEV_AGENT["auth0_client_id"] or _cid.startswith("discord-")):
             agent_data_access = set(SENSITIVE_PATTERNS.keys())
         else:
             agent_record = agent_registry.get_by_client_id(_cid)
@@ -2047,4 +2190,4 @@ if __name__ == "__main__":
     logger.info(f"Proxying to OpenClaw at: {OPENCLAW_UPSTREAM}")
     logger.info(f"Backboard dashboard → http://localhost:{SHIELDCLAW_PORT}/shieldclaw/backboard")
     logger.info(f"Auth0 debug panel  → http://localhost:{SHIELDCLAW_PORT}/shieldclaw/auth0")
-    uvicorn.run(app, host="0.0.0.0", port=SHIELDCLAW_PORT)
+    uvicorn.run(app, host="0.0.0.0", port=SHIELDCLAW_PORT, access_log=False)
