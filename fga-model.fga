@@ -12,7 +12,6 @@ model
 #   thread     — a Backboard.io conversation thread
 #   memory     — a user's LTM memory profile
 #   file       — a file/directory accessible through the proxy
-#   email      — email actions (send, read, delete) via Gmail integration
 #   approval   — a pending approval request
 #
 # Relations cascade: owner implies admin implies member implies viewer
@@ -56,13 +55,6 @@ type file
     define viewer: [user, agent] or editor
     define can_delete: [user] or owner
     define can_execute: [user, agent] or owner
-
-type email
-  relations
-    define owner: [user]
-    define can_read: [user, agent] or owner
-    define can_send: [user, agent] or owner
-    define can_delete: [user] or owner
 
 type approval
   relations

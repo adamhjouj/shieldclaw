@@ -21,10 +21,8 @@ from openfga_sdk import (
     Configuration,
     CheckRequest,
     TupleKey,
-    TupleKeyWithoutCondition,
     WriteRequest,
-    WriteRequestWrites,
-    WriteRequestDeletes,
+    TupleKeys,
 )
 from openfga_sdk.credentials import CredentialConfiguration, Credentials
 
@@ -145,7 +143,7 @@ async def grant_permission(
     try:
         api = _get_api()
         body = WriteRequest(
-            writes=WriteRequestWrites(
+            writes=TupleKeys(
                 tuple_keys=[TupleKey(user=user, relation=relation, object=fga_object)]
             ),
         )
@@ -181,8 +179,8 @@ async def revoke_permission(
     try:
         api = _get_api()
         body = WriteRequest(
-            deletes=WriteRequestDeletes(
-                tuple_keys=[TupleKeyWithoutCondition(user=user, relation=relation, object=fga_object)]
+            deletes=TupleKeys(
+                tuple_keys=[TupleKey(user=user, relation=relation, object=fga_object)]
             ),
         )
         if FGA_MODEL_ID:
@@ -249,7 +247,7 @@ async def batch_grant(tuples: list) -> bool:
             )
             for t in tuples
         ]
-        body = WriteRequest(writes=WriteRequestWrites(tuple_keys=writes))
+        body = WriteRequest(writes=TupleKeys(tuple_keys=writes))
         if FGA_MODEL_ID:
             body.authorization_model_id = FGA_MODEL_ID
 
