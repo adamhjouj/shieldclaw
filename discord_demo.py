@@ -5,20 +5,24 @@ ShieldClaw Discord Demo Bot — DM only.
 Just DM the bot to start. /reset to restart anytime.
 """
 
+import os
 import time
 import httpx
 import discord
+from dotenv import load_dotenv
 
-DISCORD_TOKEN = "MTQ3OTY2OTEwMzM3MDQzNjY4OQ.GBBNwL.d8anHBXsSImR1rQyvtsXB1bHB0BbIy24mHmTD4"
-SHIELDCLAW_URL = "http://localhost:8443"
+load_dotenv()
 
-AGENT_CLIENT_ID = "zBtyTbJqkIwy1cHW2Yw40dg6Z9e11t0d"
-AGENT_CLIENT_SECRET = "cSd4bZERKgCSPr5NeBjBFJWivrM_8YgrrRYbwFvS1LFIw64YYWKm-qXv9sNnjU4B"
-AGENT_ID = "agent_18f5b0d7858c"
+DISCORD_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+SHIELDCLAW_URL = os.environ.get("SHIELDCLAW_URL", "http://localhost:8443")
 
-AUTH0_DOMAIN = "codcodingcode.ca.auth0.com"
-AUTH0_AUDIENCE = "https://shieldclaw-gateway"
-ADMIN_TOKEN = "dev-bypass-token"
+AGENT_CLIENT_ID = os.environ.get("DISCORD_AGENT_CLIENT_ID", "")
+AGENT_CLIENT_SECRET = os.environ.get("DISCORD_AGENT_CLIENT_SECRET", "")
+AGENT_ID = os.environ.get("DISCORD_AGENT_ID", "")
+
+AUTH0_DOMAIN = os.environ.get("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
+AUTH0_AUDIENCE = os.environ.get("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
+ADMIN_TOKEN = os.environ.get("SHIELDCLAW_ADMIN_TOKEN", "dev-bypass-token")
 
 _sessions: dict = {}
 _token_cache: dict = {}

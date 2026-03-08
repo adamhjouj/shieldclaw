@@ -65,11 +65,114 @@ deny:
   - command: "sudo"
     reason: "Privilege escalation is not permitted for agents"
 
-  - command: "chmod 777"
-    reason: "World-writable permissions are a security risk"
+  - command: "chmod"
+    reason: "Agents cannot change file permissions — blocked by Auth0 FGA"
 
   - command: "chown"
-    reason: "Ownership changes are not permitted for agents"
+    reason: "Agents cannot change file ownership — blocked by Auth0 FGA"
+
+  - command: "chgrp"
+    reason: "Agents cannot change file group ownership — blocked by Auth0 FGA"
+
+  - command: "setfacl"
+    reason: "Agents cannot modify file ACLs — blocked by Auth0 FGA"
+
+  - command: "xattr"
+    reason: "Agents cannot modify extended file attributes — blocked by Auth0 FGA"
+
+  # --- Scope creep / self-modification ---
+  - command: "edit fga_policy"
+    reason: "Agents cannot modify their own authorization policy — blocked by Auth0 FGA"
+
+  - command: "edit main.py"
+    reason: "Agents cannot modify ShieldClaw gateway source code — blocked by Auth0 FGA"
+
+  - command: "edit evaluator.py"
+    reason: "Agents cannot modify ShieldBot evaluation logic — blocked by Auth0 FGA"
+
+  - command: "edit discord_bot.py"
+    reason: "Agents cannot modify the Discord bot — blocked by Auth0 FGA"
+
+  - command: "edit fga_client.py"
+    reason: "Agents cannot modify the FGA client — blocked by Auth0 FGA"
+
+  - command: "edit fga.py"
+    reason: "Agents cannot modify the FGA engine — blocked by Auth0 FGA"
+
+  - path_prefix: fga_policy
+    reason: "Agents cannot access FGA policy files — blocked by Auth0 FGA"
+
+  # --- Package management ---
+  - command: "pip install"
+    reason: "Agents cannot install Python packages — blocked by Auth0 FGA"
+
+  - command: "pip uninstall"
+    reason: "Agents cannot remove Python packages — blocked by Auth0 FGA"
+
+  - command: "npm install"
+    reason: "Agents cannot install Node packages — blocked by Auth0 FGA"
+
+  - command: "npm uninstall"
+    reason: "Agents cannot remove Node packages — blocked by Auth0 FGA"
+
+  - command: "brew install"
+    reason: "Agents cannot install system packages — blocked by Auth0 FGA"
+
+  - command: "brew uninstall"
+    reason: "Agents cannot remove system packages — blocked by Auth0 FGA"
+
+  - command: "apt install"
+    reason: "Agents cannot install system packages — blocked by Auth0 FGA"
+
+  - command: "apt remove"
+    reason: "Agents cannot remove system packages — blocked by Auth0 FGA"
+
+  # --- Infrastructure / config changes ---
+  - command: "crontab"
+    reason: "Agents cannot create or modify cron jobs — blocked by Auth0 FGA"
+
+  - command: "systemctl"
+    reason: "Agents cannot manage system services — blocked by Auth0 FGA"
+
+  - command: "launchctl"
+    reason: "Agents cannot manage macOS services — blocked by Auth0 FGA"
+
+  - command: "nginx"
+    reason: "Agents cannot modify web server config — blocked by Auth0 FGA"
+
+  - command: "apache"
+    reason: "Agents cannot modify web server config — blocked by Auth0 FGA"
+
+  - command: "iptables"
+    reason: "Agents cannot modify firewall rules — blocked by Auth0 FGA"
+
+  - command: "ufw"
+    reason: "Agents cannot modify firewall rules — blocked by Auth0 FGA"
+
+  - command: "dns"
+    reason: "Agents cannot modify DNS records — blocked by Auth0 FGA"
+
+  - path_prefix: /etc/
+    reason: "Agents cannot modify system configuration files — blocked by Auth0 FGA"
+
+  - path_prefix: /usr/local/etc
+    reason: "Agents cannot modify local system config — blocked by Auth0 FGA"
+
+  # --- FGA self-granting / privilege escalation ---
+  - route_prefix: /shieldclaw/fga/grant
+    reason: "Agents cannot grant FGA permissions — blocked by Auth0 FGA"
+
+  - route_prefix: /shieldclaw/fga/revoke
+    reason: "Agents cannot revoke FGA permissions — blocked by Auth0 FGA"
+
+  # --- Revoking / rotating other agents ---
+  - command: "revoke"
+    route_prefix: /shieldclaw/agents/
+    reason: "Agents cannot revoke other agents' registrations — blocked by Auth0 FGA"
+
+  - command: "rotate"
+    route_prefix: /shieldclaw/agents/
+    reason: "Agents cannot rotate other agents' keys — blocked by Auth0 FGA"
 
   # --- Database destructive operations ---
   - command: "drop table"
@@ -105,6 +208,13 @@ deny:
 
   - route_prefix: /api/v1/config
     reason: "Config API is off-limits to agents"
+
+  # --- Sensitive email operations (require human approval) ---
+  - action_type: "email:delete_email"
+    reason: "Email deletion is a sensitive action — requires human approval"
+
+  - command: "delete_email"
+    reason: "Email deletion is a sensitive action — requires human approval"
 
 # ---------------------------------------------------------------------------
 # ALLOW — permitted operations (checked after deny rules pass)

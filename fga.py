@@ -363,6 +363,16 @@ def _extract_fga_context(
             return "file", safe_id, "editor"
         return "file", safe_id, "viewer"
 
+    # Email tool actions (from BackboardInterpreter)
+    if "email" in action_type.lower() or "email" in path.lower():
+        if "delete" in action_type.lower():
+            return "email", "mailbox", "can_delete"
+        elif "send" in action_type.lower():
+            return "email", "mailbox", "can_send"
+        elif "read" in action_type.lower() or "inbox" in action_type.lower() or "search" in action_type.lower():
+            return "email", "mailbox", "can_read"
+        return "email", "mailbox", "can_read"
+
     # Generic gateway access
     if method in ("POST", "PUT", "PATCH", "DELETE"):
         return "gateway", "main", "operator"

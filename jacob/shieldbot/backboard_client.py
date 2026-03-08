@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import os
 from typing import Any
 
 from backboard import BackboardClient
 
-API_KEY = "espr_aD-mbx86g3moqVIN9pPVVB529fdpj1Qz2PP-ReI3q9A"
+API_KEY = os.environ.get("BACKBOARDS_API_KEY", "")
 ASSISTANT_ID: str | None = None  # auto-created on first use
 
 _client: BackboardClient | None = None

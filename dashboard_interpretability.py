@@ -21,6 +21,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Config
@@ -80,7 +83,7 @@ def fetch_pending() -> list[dict]:
 
 
 BACKBOARD_BASE_URL = "https://app.backboard.io/api"
-BACKBOARD_API_KEY = "espr_Lr3IM1sZUkbCK3IOGBsKRpM_o55-y3G67mqXBb_rAA4"
+BACKBOARD_API_KEY = os.environ.get("BACKBOARDS_API_KEY", "")
 _explain_assistant_id: str | None = None
 
 

@@ -86,15 +86,15 @@ with st.spinner("Probing endpoints..."):
 
     # 3. JWKS fetch (direct Auth0 call)
     if AUTH0_DOMAIN:
-        probe("JWKS", "JWT/JWKS", f"https://{AUTH0_DOMAIN}/.well-known/jwks.json")
+        probe("JWKS", "JWKS", f"https://{AUTH0_DOMAIN}/.well-known/jwks.json")
         # OpenID config
-        probe("openid-config", "JWT/JWKS", f"https://{AUTH0_DOMAIN}/.well-known/openid-configuration")
+        probe("openid-config", "JWKS", f"https://{AUTH0_DOMAIN}/.well-known/openid-configuration")
 
     # 4. ShieldClaw debug endpoint
     probe("debug", "ShieldClaw", f"{SHIELDCLAW_BASE}/shieldclaw/debug")
 
-    # 5. Agent registry
-    dev_token = "dev-bypass-token"
+    # 5. Agent Identity
+    dev_token = os.getenv("SHIELDCLAW_ADMIN_TOKEN", "dev-bypass-token")
     auth_headers = {"Authorization": f"Bearer {dev_token}"}
     probe("list-agents", "Agent Identity", f"{SHIELDCLAW_BASE}/shieldclaw/agents", headers=auth_headers)
 
@@ -110,7 +110,7 @@ with st.spinner("Probing endpoints..."):
     a0_audience = os.getenv("AUTH0_AUDIENCE", auth0_cfg.get("audience", ""))
     if AUTH0_DOMAIN and a0_client_id and a0_client_secret:
         probe_post(
-            "token-endpoint", "Auth0 Token",
+            "token-endpoint", "Auth0 Token Endpoint (Client Credentials)",
             f"https://{AUTH0_DOMAIN}/oauth/token",
             json_body={
                 "grant_type": "client_credentials",

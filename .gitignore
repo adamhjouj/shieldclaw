@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.env
 .venv/
 venv/
 agent_registry.json
@@ -8,4 +9,3 @@ agent_registry.json
 fga_policy_agent_*.yaml
 gmail_credentials.json
 gmail_token.json
-.env

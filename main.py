@@ -57,7 +57,7 @@ _DEV_AGENT = {
     "data_access": [],  # populated after SENSITIVE_PATTERNS is imported
     "revoked": False,
 }
-_DEV_TOKEN = "dev-bypass-token"
+_DEV_TOKEN = os.getenv("SHIELDCLAW_ADMIN_TOKEN", "dev-bypass-token")
 
 # ---------------------------------------------------------------------------
 # Human-in-the-loop approval store

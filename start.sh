@@ -28,6 +28,11 @@ lsof -ti:$OPENCLAW_PORT -ti:$SHIELDCLAW_PORT 2>/dev/null | xargs kill -9 2>/dev/
 pkill -9 -f "discord_bot.py" 2>/dev/null || true
 sleep 1
 
+# ── Load .env from project root so all processes share the same secrets ──
+set -a
+source "$DIR/.env"
+set +a
+
 # ── 1. OpenClaw gateway ──
 echo -e "${CYAN}[1/3]${NC} Starting OpenClaw gateway on port $OPENCLAW_PORT..."
 cd "$DIR/openclaw"

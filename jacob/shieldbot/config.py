@@ -16,6 +16,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 EvalMode = Literal["think", "fast"]
@@ -24,7 +25,7 @@ EvalMode = Literal["think", "fast"]
 # Backboard unified API
 # ---------------------------------------------------------------------------
 BACKBOARD_BASE_URL = "https://app.backboard.io/api"
-BACKBOARD_API_KEY = "espr_aD-mbx86g3moqVIN9pPVVB529fdpj1Qz2PP-ReI3q9A"
+BACKBOARD_API_KEY = os.environ.get("BACKBOARDS_API_KEY", "")
 
 # Model identifiers as routed through Backboard
 BACKBOARD_THINK_MODEL = "claude-sonnet-4-6"
