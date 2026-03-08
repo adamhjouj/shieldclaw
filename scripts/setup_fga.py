@@ -34,7 +34,7 @@ from openfga_sdk import (
     RelationMetadata,
     RelationReference,
     WriteRequest,
-    TupleKeys,
+    WriteRequestWrites,
     TupleKey,
 )
 from openfga_sdk.credentials import CredentialConfiguration, Credentials
@@ -209,7 +209,7 @@ async def main():
         print("[setup_fga] Writing bootstrap tuples...")
         try:
             bootstrap = WriteRequest(
-                writes=TupleKeys(
+                writes=WriteRequestWrites(
                     tuple_keys=[
                         TupleKey(
                             user=f"user:{test_user}",

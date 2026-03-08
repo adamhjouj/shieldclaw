@@ -373,6 +373,9 @@ async def on_message(message: discord.Message):
                     await status_msg.edit(content="⛔ That request was denied by the admin.")
                 elif "timed out" in detail.lower():
                     await status_msg.edit(content="⏰ No admin response in time — request auto-denied.")
+                elif "[FGA]" in detail:
+                    clean_reason = detail.removeprefix("[ShieldBot] ").split(" (risk=")[0].removeprefix("[FGA] ")
+                    await status_msg.edit(content=f"⛔ Unfortunately, Auth0's FGA system has blocked this action: {clean_reason}")
                 else:
                     reason = detail.removeprefix("[ShieldBot] ").split(" (risk=")[0]
                     await status_msg.edit(content=f"⛔ Blocked: {reason}")

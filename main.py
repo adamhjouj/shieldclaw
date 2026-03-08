@@ -1481,6 +1481,12 @@ class BackboardInterpreter:
         "read_email",
         "search_email",
         "list_inbox",
+        "delete_email",
+    })
+
+    # Tools that require human approval before execution
+    SENSITIVE_TOOLS: frozenset[str] = frozenset({
+        "delete_email",
     })
     TOOL_TIMEOUT = 45
     DEFAULT_MEMORY_MODE = MemoryMode.AUTO
@@ -1503,6 +1509,9 @@ class BackboardInterpreter:
         "   - read_email: Read a specific email. Args: message_id (required).\n"
         "   - search_email: Search emails. Args: query (required, Gmail search syntax), "
         "max_results (optional, default 10).\n"
+        "   - delete_email: Delete (trash) an email. Args: message_id (required). "
+        "NOTE: This is a SENSITIVE action — it requires human approval before execution. "
+        "The admin will be notified via Discord and must approve/deny within 90 seconds.\n"
         "4. CONTEXT — Use stored memories to personalise responses and tool "
         "selection.\n"
         "5. SAFETY — Respect denied-tool lists. Never expose infrastructure "
@@ -1638,6 +1647,20 @@ class BackboardInterpreter:
                         "bcc": {"type": "string", "description": "BCC recipients (optional)."},
                     },
                     "required": ["to", "subject", "body"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "delete_email",
+                "description": "Delete (trash) an email by message ID. This is a sensitive action that requires human approval.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "message_id": {"type": "string", "description": "Gmail message ID to delete."},
+                    },
+                    "required": ["message_id"],
                 },
             },
         },
@@ -1846,6 +1869,79 @@ class BackboardInterpreter:
 
         return calls
 
+    # ── Sensitive tool approval ───────────────────────────────────────────
+
+    async def _request_sensitive_approval(
+        self, tool_name: str, tool_args: dict,
+    ) -> bool:
+        """Check Auth0 FGA first, then fall back to human approval via Discord."""
+        # Layer 1: Auth0 FGA relationship check
+        action_type = f"email:{tool_name}"
+        fga_payload = {
+            "method": "TOOL_CALL",
+            "path": f"/ltm/tool/{tool_name}",
+            "body": tool_args,
+        }
+        try:
+            fga_result = await check_fga_full(
+                agent_id="backboard-interpreter",
+                action_type=action_type,
+                payload=fga_payload,
+            )
+            if fga_result.allowed:
+                logger.info(
+                    "[BackboardInterpreter] FGA allowed %s: %s",
+                    tool_name, fga_result.reason,
+                )
+                return True
+            logger.info(
+                "[BackboardInterpreter] FGA denied %s: %s — requesting human approval",
+                tool_name, fga_result.reason,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[BackboardInterpreter] FGA check failed for %s: %s — requesting human approval",
+                tool_name, exc,
+            )
+
+        # Layer 2: Human approval via Discord DM
+        approval_id = str(uuid.uuid4())[:8].upper()
+        event = asyncio.Event()
+        _pending_approvals[approval_id] = {
+            "event": event,
+            "approved": None,
+            "request": {
+                "method": "TOOL_CALL",
+                "path": f"/ltm/tool/{tool_name}",
+                "action_type": f"email:{tool_name}",
+                "reason": f"Sensitive tool '{tool_name}' requires human approval",
+                "risk_score": 75,
+                "agent_name": "BackboardInterpreter",
+                "tool_args": {k: str(v)[:100] for k, v in tool_args.items()},
+            },
+        }
+        logger.info(
+            "[BackboardInterpreter] Awaiting approval for %s (id=%s)",
+            tool_name, approval_id,
+        )
+        try:
+            await asyncio.wait_for(event.wait(), timeout=90.0)
+            approved = _pending_approvals[approval_id]["approved"]
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[BackboardInterpreter] Approval timed out for %s (id=%s)",
+                tool_name, approval_id,
+            )
+            approved = False
+        finally:
+            _pending_approvals.pop(approval_id, None)
+
+        if approved:
+            logger.info("[BackboardInterpreter] Admin approved %s (id=%s)", tool_name, approval_id)
+        else:
+            logger.warning("[BackboardInterpreter] Admin denied %s (id=%s)", tool_name, approval_id)
+        return bool(approved)
+
     # ── Email tool helpers ────────────────────────────────────────────────
 
     EMAIL_SCRIPT = os.path.join(
@@ -1880,6 +1976,8 @@ class BackboardInterpreter:
                 "--query", tool_args.get("query", ""),
                 "--max-results", str(tool_args.get("max_results", 10)),
             ]
+        elif tool_name == "delete_email":
+            cmd += ["delete", "--message-id", tool_args.get("message_id", "")]
         else:
             return {"error": f"Unknown email tool: {tool_name}", "status": "error"}
 
@@ -1910,7 +2008,7 @@ class BackboardInterpreter:
     # ── Main tool dispatcher ─────────────────────────────────────────────
 
     EMAIL_TOOLS: frozenset[str] = frozenset({
-        "send_email", "read_email", "search_email", "list_inbox",
+        "send_email", "read_email", "search_email", "list_inbox", "delete_email",
     })
 
     async def execute_clawdbot_task(
@@ -1927,6 +2025,15 @@ class BackboardInterpreter:
             return {"error": "Invalid tool arguments", "status": "error"}
 
         logger.info("[BackboardInterpreter] Executing tool %s", tool_name)
+
+        # Sensitive tools require human approval before execution
+        if tool_name in self.SENSITIVE_TOOLS:
+            approved = await self._request_sensitive_approval(tool_name, tool_args)
+            if not approved:
+                return {
+                    "error": f"Tool '{tool_name}' was denied by admin (sensitive action requires approval).",
+                    "status": "blocked",
+                }
 
         # Email tools — execute directly via email_agent.py
         if tool_name in self.EMAIL_TOOLS:
