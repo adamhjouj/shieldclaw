@@ -30,7 +30,7 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 SHIELDCLAW_URL = os.environ.get("SHIELDCLAW_URL", "http://127.0.0.1:8443")
-SHIELDCLAW_TOKEN = os.environ.get("SHIELDCLAW_TOKEN", "dev-bypass-token")
+SHIELDCLAW_TOKEN = os.environ.get("SHIELDCLAW_TOKEN", "")
 POLL_INTERVAL = 3  # seconds between auto-refreshes
 
 HEADERS = {"Authorization": f"Bearer {SHIELDCLAW_TOKEN}"}
@@ -82,7 +82,7 @@ def fetch_pending() -> list[dict]:
         return []
 
 
-BACKBOARD_BASE_URL = "https://app.backboard.io/api"
+BACKBOARD_BASE_URL = os.environ.get("BACKBOARD_BASE_URL", "")
 BACKBOARD_API_KEY = os.environ.get("BACKBOARDS_API_KEY", "")
 _explain_assistant_id: str | None = None
 

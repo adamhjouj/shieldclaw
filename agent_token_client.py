@@ -9,13 +9,14 @@ Usage:
     from agent_token_client import AgentTokenClient
 
     client = AgentTokenClient(
-        client_id="agent_client_id_from_registration",
-        client_secret="agent_client_secret_from_registration",
+        client_id=os.getenv("AGENT_CLIENT_ID"),
+        client_secret=os.getenv("AGENT_CLIENT_SECRET"),
     )
     token = await client.get_token()
     # Use token in Authorization: Bearer header to call ShieldClaw
 """
 
+import os
 import time
 import logging
 from typing import Optional
@@ -24,8 +25,8 @@ import httpx
 
 logger = logging.getLogger("shieldclaw.agent_token")
 
-AUTH0_DOMAIN = "codcodingcode.ca.auth0.com"
-AUTH0_AUDIENCE = "https://shieldclaw-gateway"
+AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
+AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
 
 
 class AgentTokenClient:

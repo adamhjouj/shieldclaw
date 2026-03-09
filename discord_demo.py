@@ -20,9 +20,9 @@ AGENT_CLIENT_ID = os.environ.get("DISCORD_AGENT_CLIENT_ID", "")
 AGENT_CLIENT_SECRET = os.environ.get("DISCORD_AGENT_CLIENT_SECRET", "")
 AGENT_ID = os.environ.get("DISCORD_AGENT_ID", "")
 
-AUTH0_DOMAIN = os.environ.get("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
-AUTH0_AUDIENCE = os.environ.get("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
-ADMIN_TOKEN = os.environ.get("SHIELDCLAW_ADMIN_TOKEN", "dev-bypass-token")
+AUTH0_DOMAIN = os.environ.get("AUTH0_DOMAIN", "")
+AUTH0_AUDIENCE = os.environ.get("AUTH0_AUDIENCE", "")
+ADMIN_TOKEN = os.environ.get("SHIELDCLAW_ADMIN_TOKEN", "")
 
 _sessions: dict = {}
 _token_cache: dict = {}

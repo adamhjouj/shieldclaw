@@ -37,7 +37,7 @@ log = logging.getLogger("clawdbot.onboarding")
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 SHIELDCLAW_URL = os.getenv("SHIELDCLAW_URL", "http://localhost:8443")
-SHIELDCLAW_ADMIN_TOKEN = os.getenv("SHIELDCLAW_ADMIN_TOKEN", "dev-bypass-token")
+SHIELDCLAW_ADMIN_TOKEN = os.getenv("SHIELDCLAW_ADMIN_TOKEN", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 VALID_SCOPES = [

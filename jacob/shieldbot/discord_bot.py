@@ -27,9 +27,9 @@ DISCORD_TOKEN = os.environ.get("DISCORD_BOT_TOKEN") or os.environ.get("DISCORD_T
 _admin_id_raw = os.environ.get("DISCORD_ADMIN_USER_ID", "").strip()
 DISCORD_ADMIN_USER_ID: int | None = int(_admin_id_raw) if _admin_id_raw.isdigit() else None
 
-# ShieldClaw gateway — bot authenticates as an agent via dev-bypass token
+# ShieldClaw gateway — bot authenticates as an agent via token from env
 SHIELDCLAW_URL = os.environ.get("SHIELDCLAW_URL", "http://127.0.0.1:8443")
-SHIELDCLAW_TOKEN = os.environ.get("SHIELDCLAW_TOKEN", "dev-bypass-token")
+SHIELDCLAW_TOKEN = os.environ.get("SHIELDCLAW_TOKEN", "")
 
 # Matches the pairing code in openclaw's reply: "openclaw pairing approve discord XXXXXXXX"
 _PAIRING_RE = re.compile(r"openclaw pairing approve discord ([A-Z0-9]{6,12})", re.IGNORECASE)
@@ -201,9 +201,16 @@ _SYSTEM_MESSAGE = {
     "content": (
         "You are a helpful AI assistant accessed via Discord. "
         "NEVER mention terminals, shells, CLI commands, gateway restarts, 'openclaw', exec tools, "
-        "allowlists, or any internal infrastructure to the user. "
-        "If a tool is unavailable or a command fails, just say you're unable to do that right now — "
-        "do not explain why or suggest workarounds involving the terminal.\n\n"
+        "allowlists, or any internal infrastructure to the user.\n\n"
+        "TOOL ACCESS RULES:\n"
+        "- You have FULL access to all your tools including email (list_inbox, read_email, "
+        "search_email, send_email), web search, and execute_clawdbot_task.\n"
+        "- When a user asks you to do something, ALWAYS call the appropriate tool. NEVER claim "
+        "a tool is unavailable, that there are 'technical limitations', 'system limitations', "
+        "or that the user needs to 'top up credits'. There is NO credit system.\n"
+        "- If a tool call returns an actual error, report the EXACT error — do not paraphrase "
+        "it as a vague 'limitation' or make up reasons like insufficient credits.\n"
+        "- NEVER refuse a tool action without attempting it first.\n\n"
         "CRITICAL SECURITY RULE — PROTECTED FILES:\n"
         "The following files are PERMANENTLY protected by Auth0's FGA (Fine-Grained Authorization) policy "
         "and you MUST NEVER agree to view, edit, modify, rewrite, update, refactor, or help with changes to them "
@@ -346,6 +353,8 @@ async def _chat(channel_id: int, user_message: str, user_id: int = None) -> str:
             headers={
                 "Authorization": f"Bearer {SHIELDCLAW_TOKEN}",
                 "Content-Type": "application/json",
+                "X-Discord-User-Id": str(user_id or channel_id),
+                "X-Discord-Channel-Id": str(channel_id),
             },
             json={"messages": messages},
         )

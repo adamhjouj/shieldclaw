@@ -57,7 +57,7 @@ _DEV_AGENT = {
     "data_access": [],  # populated after SENSITIVE_PATTERNS is imported
     "revoked": False,
 }
-_DEV_TOKEN = os.getenv("SHIELDCLAW_ADMIN_TOKEN", "dev-bypass-token")
+_DEV_TOKEN = os.getenv("SHIELDCLAW_ADMIN_TOKEN", "")
 
 # ---------------------------------------------------------------------------
 # Human-in-the-loop approval store
@@ -93,13 +93,13 @@ _maybe_register_and_exit()
 
 # --- Config ---
 
-AUTH0_DOMAIN = vault.get("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
+AUTH0_DOMAIN = vault.get("AUTH0_DOMAIN", "")
 AUTH0_CLIENT_ID = vault.get("AUTH0_CLIENT_ID")
 AUTH0_CLIENT_SECRET = vault.get("AUTH0_CLIENT_SECRET", "")
-AUTH0_AUDIENCE = vault.get("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
+AUTH0_AUDIENCE = vault.get("AUTH0_AUDIENCE", "")
 AUTH0_ALGORITHMS = ["RS256"]
 OPENCLAW_UPSTREAM = vault.get("OPENCLAW_UPSTREAM", "http://127.0.0.1:18789")
-OPENCLAW_TOKEN = vault.get("OPENCLAW_TOKEN", "shieldclaw-local-token")
+OPENCLAW_TOKEN = vault.get("OPENCLAW_TOKEN", "")
 SHIELDCLAW_PORT = int(vault.get("SHIELDCLAW_PORT", "8443"))
 
 JWKS_URL = f"https://{AUTH0_DOMAIN}/.well-known/jwks.json"
@@ -1489,14 +1489,33 @@ class BackboardInterpreter:
     LTM_SYSTEM_PROMPT = (
         "You are ShieldClaw's Long-Term Memory assistant. You sit between "
         "Discord users and Clawdbot/OpenClaw.\n\n"
+        "CRITICAL RULES — NEVER VIOLATE THESE:\n"
+        "- You have FULL access to all tools listed below. They are always available.\n"
+        "- NEVER claim you cannot access a tool, that there are 'technical limitations', "
+        "that the user needs to 'top up credits', or that any tool is unavailable.\n"
+        "- NEVER fabricate errors or excuses. If a tool call fails, report the ACTUAL "
+        "error message — do not invent reasons like 'insufficient credits' or "
+        "'account limitations'.\n"
+        "- When a user asks you to do something, ALWAYS attempt it by calling the "
+        "appropriate tool. Never refuse without trying first.\n"
+        "- There is NO credit system. There are NO account limitations. All tools "
+        "are free and unlimited. Do not mention credits, billing, or account "
+        "status under any circumstances.\n\n"
         "RESPONSIBILITIES:\n"
         "1. MEMORY — Maintain structured operational context per user: response "
         "style preferences, trusted/denied tools, recurring task patterns, "
         "channel sensitivity levels, and whether execution requires approval. "
         "NEVER store raw chat history.\n"
         "2. TOOL DISPATCH — When the user's request requires Clawdbot/OpenClaw, "
-        "use the execute_clawdbot_task tool with a clear task description.\n"
-        "3. EMAIL — You can send and read emails via Gmail API. Available tools:\n"
+        "use the execute_clawdbot_task tool with a clear task description. "
+        "This includes: web searches, browsing websites, reading/writing files, "
+        "running shell commands, and any task you cannot do yourself. "
+        "You DO have internet access through OpenClaw — never tell the user "
+        "you can't search the web or browse. Just dispatch it via "
+        "execute_clawdbot_task.\n"
+        "3. EMAIL — You HAVE full email access via Gmail API. When the user asks "
+        "to read, search, or send email, IMMEDIATELY call the appropriate tool. "
+        "Do not ask for permission or claim you cannot do it. Available tools:\n"
         "   - send_email: Send an email. Args: to (required), subject (required), "
         "body (required), cc (optional), bcc (optional).\n"
         "   - list_inbox: List recent inbox messages. Args: max_results (optional, default 10).\n"
@@ -1507,12 +1526,17 @@ class BackboardInterpreter:
         "selection.\n"
         "5. SAFETY — Respect denied-tool lists. Never expose infrastructure "
         "details to users.\n\n"
+        "TOOL FAILURE PROTOCOL:\n"
+        "- If a tool returns an error, report EXACTLY what the error says.\n"
+        "- Never paraphrase errors as 'technical limitations' or 'credit issues'.\n"
+        "- If a tool fails, suggest concrete troubleshooting steps based on the "
+        "actual error.\n\n"
         "When you discover a user's operational preference, persist it as "
         "structured memory so it survives across sessions."
     )
 
     def __init__(self) -> None:
-        self._api_key = os.getenv("BACKBOARD_API_KEY", shieldbot_config.BACKBOARD_API_KEY)
+        self._api_key = os.getenv("BACKBOARDS_API_KEY", "") or os.getenv("BACKBOARD_API_KEY", "") or shieldbot_config.BACKBOARD_API_KEY
         self._base_url = os.getenv("BACKBOARD_BASE_URL", shieldbot_config.BACKBOARD_BASE_URL)
         self._assistant_id = os.getenv("BACKBOARD_ASSISTANT_ID", "")
         self._model_provider = os.getenv("BACKBOARD_MODEL_PROVIDER", "anthropic")
@@ -1523,6 +1547,7 @@ class BackboardInterpreter:
             os.path.dirname(os.path.abspath(__file__)), "backboard_ltm.db",
         )
         self._init_db()
+        self._needs_assistant_update = True
         logger.info("[BackboardInterpreter] Initialised — db=%s", self._db_path)
 
     # ── SQLite persistence ────────────────────────────────────────────────
@@ -1813,6 +1838,23 @@ class BackboardInterpreter:
                     "memory": memory_mode.to_backboard_param(),
                 },
             )
+            if resp.status_code == 404:
+                # Thread no longer exists on Backboard — purge stale mapping
+                logger.warning(
+                    "[BackboardInterpreter] Thread %s returned 404 — purging stale mapping",
+                    thread_id,
+                )
+                with self._db() as conn:
+                    conn.execute(
+                        "DELETE FROM thread_map WHERE backboard_thread_id = ?",
+                        (thread_id,),
+                    )
+                    conn.commit()
+                raise httpx.HTTPStatusError(
+                    f"Thread {thread_id} not found (stale mapping purged — retry will create a new thread)",
+                    request=resp.request,
+                    response=resp,
+                )
             resp.raise_for_status()
             return resp.json()
 
@@ -2095,6 +2137,11 @@ class BackboardInterpreter:
         full_messages: list[dict],
     ) -> str:
         """Process a Discord message through Backboard LTM + Clawdbot/OpenClaw."""
+        # Force assistant system prompt + tools update on first message after restart
+        if self._needs_assistant_update:
+            await self.get_or_create_assistant()
+            self._needs_assistant_update = False
+
         memory_mode = self.determine_memory_mode(discord_user_id)
         thread_id = await self.get_or_create_thread(
             discord_user_id, discord_channel_id, guild_id,
@@ -2269,6 +2316,9 @@ async def _proxy_to_openclaw_chat(
             )
     except httpx.ConnectError:
         raise HTTPException(status_code=502, detail="OpenClaw gateway unreachable")
+    except Exception as exc:
+        logger.error("[_proxy_to_openclaw_chat] %s", exc)
+        raise HTTPException(status_code=500, detail=f"OpenClaw proxy error: {exc}")
 
 
 @app.post("/v1/chat/completions")
@@ -2318,11 +2368,34 @@ async def chat_completions_with_ltm(request: Request):
             full_messages=messages,
         )
     except Exception as exc:
-        logger.error("[BackboardInterpreter] %s", exc)
+        import traceback
+        logger.error(
+            "[BackboardInterpreter] process_message failed:\n%s",
+            traceback.format_exc(),
+        )
         log_request(
             identity, token_scopes, request.method, "/v1/chat/completions", 200,
         )
-        return await _proxy_to_openclaw_chat(messages, identity, token_scopes)
+        try:
+            return await _proxy_to_openclaw_chat(messages, identity, token_scopes)
+        except Exception as fallback_exc:
+            logger.error(
+                "[BackboardInterpreter] OpenClaw fallback also failed:\n%s",
+                traceback.format_exc(),
+            )
+            return JSONResponse(
+                content={
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": f"Something went wrong processing your request. Error: {exc}",
+                        },
+                        "index": 0,
+                        "finish_reason": "stop",
+                    }],
+                },
+                status_code=200,
+            )
 
     log_request(
         identity, token_scopes, request.method, "/v1/chat/completions", 200,

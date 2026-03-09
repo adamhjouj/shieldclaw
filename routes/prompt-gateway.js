@@ -15,7 +15,7 @@ function verifySecret(incoming, expected) {
   }
 }
 
-const BACKBOARD_BASE_URL = process.env.BACKBOARD_BASE_URL || 'https://app.backboard.io/api';
+const BACKBOARD_BASE_URL = process.env.BACKBOARD_BASE_URL || '';
 
 async function forwardToBackboard(threadId, content, memory = 'Auto') {
   const apiKey = process.env.BACKBOARD_API_KEY;

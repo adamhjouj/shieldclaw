@@ -3,10 +3,9 @@ ShieldClaw Auth0 Usage Tracker — Streamlit Dashboard
 Actively probes Auth0 endpoints, tracks every call over time, and visualizes them.
 """
 
+import os
 import time
 from datetime import datetime
-
-import os
 
 import httpx
 import pandas as pd
@@ -21,11 +20,13 @@ st.set_page_config(page_title="ShieldClaw Auth0 Tracker", page_icon="🛡️", l
 SHIELDCLAW_BASE = st.sidebar.text_input("ShieldClaw URL", value="http://localhost:8443")
 REFRESH_INTERVAL = st.sidebar.slider("Auto-refresh (seconds)", 3, 60, 5)
 
-# Persistent event history across reruns
 if "event_history" not in st.session_state:
     st.session_state.event_history = []
 
-AUTH0_DOMAIN = None  # filled after first fetch
+AUTH0_DOMAIN = None
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 
 def record_event(category: str, endpoint: str, status: str, latency_ms: float, detail: str = ""):
@@ -73,44 +74,48 @@ def probe_post(label: str, category: str, url: str, json_body: dict, headers: di
 st.title("🛡️ ShieldClaw — Auth0 Event Tracker")
 st.caption("Actively probes Auth0 endpoints every refresh cycle and tracks all calls over time.")
 
-with st.spinner("Probing endpoints..."):
-    # 1. ShieldClaw health
-    probe("health", "ShieldClaw", f"{SHIELDCLAW_BASE}/health")
+CHART_LAYOUT = dict(
+    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)",
+    font=dict(color="white"),
+)
 
-    # 2. Auth0 status (main data source)
+SCATTER_COLORS = {"ok": "#00cc96", "failed": "#ef553b"}
+
+with st.spinner("Probing endpoints..."):
+    # 1. Auth0 status
     ok, _, resp = probe("auth0/status", "Auth0 Config", f"{SHIELDCLAW_BASE}/shieldclaw/auth0/status")
     status_data = resp.json() if ok else {}
-
     auth0_cfg = status_data.get("auth0", {})
     AUTH0_DOMAIN = auth0_cfg.get("domain", "")
 
-    # 3. JWKS fetch (direct Auth0 call)
+    # 2. JWKS fetch (direct Auth0 call)
     if AUTH0_DOMAIN:
         probe("JWKS", "JWKS", f"https://{AUTH0_DOMAIN}/.well-known/jwks.json")
-        # OpenID config
         probe("openid-config", "JWKS", f"https://{AUTH0_DOMAIN}/.well-known/openid-configuration")
 
-    # 4. ShieldClaw debug endpoint
+    # 3. ShieldClaw debug endpoint
     probe("debug", "ShieldClaw", f"{SHIELDCLAW_BASE}/shieldclaw/debug")
 
-    # 5. Agent Identity
-    dev_token = os.getenv("SHIELDCLAW_ADMIN_TOKEN", "dev-bypass-token")
+    # 4. Agent Identity
+    dev_token = os.getenv("SHIELDCLAW_ADMIN_TOKEN", "")
     auth_headers = {"Authorization": f"Bearer {dev_token}"}
     probe("list-agents", "Agent Identity", f"{SHIELDCLAW_BASE}/shieldclaw/agents", headers=auth_headers)
 
-    # 6. Auth test — try a request WITH token (should succeed in dev bypass)
+    # 5. Auth test — with token (should succeed in dev bypass)
     probe("auth-with-token", "JWT Verification", f"{SHIELDCLAW_BASE}/shieldclaw/whoami", headers=auth_headers)
 
-    # 7. Auth test — try WITHOUT token (should fail 401)
+    # 6. Auth test — without token (should fail 401)
     probe("auth-no-token", "JWT Verification", f"{SHIELDCLAW_BASE}/shieldclaw/whoami")
 
-    # 8. Token endpoint probe (Auth0 direct — uses real .env credentials)
+    # 7. Token endpoint probe (Auth0 direct)
     a0_client_id = os.getenv("AUTH0_CLIENT_ID", "")
     a0_client_secret = os.getenv("AUTH0_CLIENT_SECRET", "")
     a0_audience = os.getenv("AUTH0_AUDIENCE", auth0_cfg.get("audience", ""))
     if AUTH0_DOMAIN and a0_client_id and a0_client_secret:
         probe_post(
-            "token-endpoint", "Auth0 Token Endpoint (Client Credentials)",
+            "token-endpoint",
+            "Auth0 Token Endpoint (Client Credentials)",
             f"https://{AUTH0_DOMAIN}/oauth/token",
             json_body={
                 "grant_type": "client_credentials",
@@ -120,8 +125,7 @@ with st.spinner("Probing endpoints..."):
             },
         )
 
-    # ── 9-12. FGA probes — test FGA rules locally (no proxy round-trip, no ShieldBot trigger)
-    # We import the FGA engine directly and run checks in-process.
+    # 8-9. FGA probes — test FGA rules locally
     try:
         from fga import check_fga as _check_fga
 
@@ -147,6 +151,8 @@ if df.empty:
     st.warning("No events recorded yet. Waiting for first probe cycle...")
     st.stop()
 
+df["color_status"] = df["status"].apply(lambda s: "ok" if s == "ok" else "failed")
+
 # ── Top metrics ──────────────────────────────────────────────────────────────
 
 total = len(df)
@@ -160,23 +166,18 @@ col1.metric("Total Calls Tracked", total)
 col2.metric("Successful", ok_count)
 col3.metric("Failed / Errors", fail_count)
 col4.metric("Categories", categories)
-col5.metric("Avg Latency", f"{avg_latency:.0f} ms" if pd.notna(avg_latency) else "—")
+col5.metric("Avg Latency", f"{avg_latency:.0f} ms" if pd.notna(avg_latency) else "N/A")
 
 # ── 1. Scatter: All Auth0 Calls Over Time ────────────────────────────────────
 
 st.header("All Auth0-Related Calls Over Time")
-
-color_map = {"ok": "#00cc96"}
-# Everything non-ok gets red
-df["color_status"] = df["status"].apply(lambda s: "ok" if s == "ok" else "failed")
-scatter_colors = {"ok": "#00cc96", "failed": "#ef553b"}
 
 fig_scatter = px.scatter(
     df,
     x="timestamp",
     y="endpoint",
     color="color_status",
-    color_discrete_map=scatter_colors,
+    color_discrete_map=SCATTER_COLORS,
     size="latency_ms",
     size_max=20,
     hover_data=["category", "status", "latency_ms", "detail"],
@@ -184,13 +185,7 @@ fig_scatter = px.scatter(
     labels={"timestamp": "Time", "endpoint": "Endpoint", "color_status": "Result"},
     height=500,
 )
-fig_scatter.update_layout(
-    plot_bgcolor="rgba(0,0,0,0)",
-    paper_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="white"),
-    xaxis_title="Time",
-    yaxis_title="Endpoint",
-)
+fig_scatter.update_layout(**CHART_LAYOUT, xaxis_title="Time", yaxis_title="Endpoint")
 st.plotly_chart(fig_scatter, use_container_width=True)
 
 # ── 2. Latency Over Time Per Category ───────────────────────────────────────
@@ -209,11 +204,7 @@ if not df_with_latency.empty:
         labels={"timestamp": "Time", "latency_ms": "Latency (ms)", "category": "Category"},
         height=400,
     )
-    fig_latency.update_layout(
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="white"),
-    )
+    fig_latency.update_layout(**CHART_LAYOUT)
     st.plotly_chart(fig_latency, use_container_width=True)
 
 # ── 3. Calls by Category ────────────────────────────────────────────────────
@@ -229,17 +220,12 @@ with col1:
         x="category",
         y="count",
         color="color_status",
-        color_discrete_map=scatter_colors,
+        color_discrete_map=SCATTER_COLORS,
         title="Total Calls per Auth0 Category",
         barmode="stack",
         height=400,
     )
-    fig_bar.update_layout(
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="white"),
-        xaxis_tickangle=-30,
-    )
+    fig_bar.update_layout(**CHART_LAYOUT, xaxis_tickangle=-30)
     st.plotly_chart(fig_bar, use_container_width=True)
 
 with col2:
@@ -252,10 +238,7 @@ with col2:
         title="Call Distribution by Category",
         height=400,
     )
-    fig_pie.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="white"),
-    )
+    fig_pie.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
     st.plotly_chart(fig_pie, use_container_width=True)
 
 # ── 4. Event Frequency ──────────────────────────────────────────────────────
@@ -271,14 +254,10 @@ fig_area = px.area(
     height=300,
     color_discrete_sequence=["#636efa"],
 )
-fig_area.update_layout(
-    plot_bgcolor="rgba(0,0,0,0)",
-    paper_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="white"),
-)
+fig_area.update_layout(**CHART_LAYOUT)
 st.plotly_chart(fig_area, use_container_width=True)
 
-# ── FGA (Fine-Grained Authorization) ─────────────────────────────────────────
+# ── 5. FGA (Fine-Grained Authorization) ─────────────────────────────────────
 
 fga_df = df[df["category"] == "FGA"]
 if not fga_df.empty:
@@ -293,13 +272,12 @@ if not fga_df.empty:
     col2.metric("Allowed", fga_ok)
     col3.metric("Blocked", fga_blocked)
 
-    # Scatter: FGA checks over time
     fig_fga_scatter = px.scatter(
         fga_df,
         x="timestamp",
         y="endpoint",
         color="color_status",
-        color_discrete_map=scatter_colors,
+        color_discrete_map=SCATTER_COLORS,
         size="latency_ms",
         size_max=18,
         hover_data=["status", "latency_ms", "detail"],
@@ -307,77 +285,63 @@ if not fga_df.empty:
         height=400,
     )
     fig_fga_scatter.update_traces(marker=dict(line=dict(width=1, color="white")))
-    fig_fga_scatter.update_layout(
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="white"),
-    )
+    fig_fga_scatter.update_layout(**CHART_LAYOUT)
     st.plotly_chart(fig_fga_scatter, use_container_width=True)
 
-    # Bar: FGA allow vs deny per endpoint
     fga_counts = fga_df.groupby(["endpoint", "color_status"]).size().reset_index(name="count")
     fig_fga_bar = px.bar(
         fga_counts,
         x="endpoint",
         y="count",
         color="color_status",
-        color_discrete_map=scatter_colors,
+        color_discrete_map=SCATTER_COLORS,
         title="FGA Verdicts by Endpoint",
         barmode="group",
         height=400,
     )
-    fig_fga_bar.update_layout(
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="white"),
-        xaxis_tickangle=-35,
-    )
+    fig_fga_bar.update_layout(**CHART_LAYOUT, xaxis_tickangle=-35)
     st.plotly_chart(fig_fga_bar, use_container_width=True)
 
-# ── 5. Failure Drill-down ───────────────────────────────────────────────────
+# ── 6. Failure Drill-down ───────────────────────────────────────────────────
 
 failures = df[df["color_status"] == "failed"]
 if not failures.empty:
     st.header("Failures & Errors")
 
     col1, col2 = st.columns(2)
+
     with col1:
         fail_by_ep = failures["endpoint"].value_counts().reset_index()
         fail_by_ep.columns = ["endpoint", "count"]
         fig_fail = px.bar(
-            fail_by_ep, x="endpoint", y="count",
+            fail_by_ep,
+            x="endpoint",
+            y="count",
             title="Failures by Endpoint",
             color_discrete_sequence=["#ef553b"],
             height=350,
         )
-        fig_fail.update_layout(
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="white"),
-        )
+        fig_fail.update_layout(**CHART_LAYOUT)
         st.plotly_chart(fig_fail, use_container_width=True)
 
     with col2:
         fig_fail_time = px.scatter(
-            failures, x="timestamp", y="endpoint",
+            failures,
+            x="timestamp",
+            y="endpoint",
             color="status",
             title="Failures Over Time",
             hover_data=["detail"],
             height=350,
         )
         fig_fail_time.update_traces(marker=dict(size=12, symbol="x"))
-        fig_fail_time.update_layout(
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="white"),
-        )
+        fig_fail_time.update_layout(**CHART_LAYOUT)
         st.plotly_chart(fig_fail_time, use_container_width=True)
 
-# ── 6. Live Status Table ────────────────────────────────────────────────────
+# ── 7. Live Status Table ────────────────────────────────────────────────────
 
 st.header("Latest Probe Results")
 
-# Show last result per endpoint
 latest = df.drop_duplicates(subset="endpoint", keep="last")[
     ["endpoint", "category", "status", "latency_ms", "timestamp"]
 ].sort_values("category")

@@ -136,8 +136,8 @@ async def main():
     store_id = os.getenv("FGA_STORE_ID")
     client_id = os.getenv("FGA_CLIENT_ID")
     client_secret = os.getenv("FGA_CLIENT_SECRET")
-    token_issuer = os.getenv("FGA_API_TOKEN_ISSUER", "fga.us.auth0.com")
-    api_audience = os.getenv("FGA_API_AUDIENCE", "https://api.us1.fga.dev/")
+    token_issuer = os.getenv("FGA_API_TOKEN_ISSUER", "")
+    api_audience = os.getenv("FGA_API_AUDIENCE", "")
 
     missing = [v for v, val in [("FGA_API_URL", api_url), ("FGA_STORE_ID", store_id),
                ("FGA_CLIENT_ID", client_id), ("FGA_CLIENT_SECRET", client_secret)] if not val]

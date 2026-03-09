@@ -16,11 +16,12 @@ import asyncio
 import json
 import sys
 
+import os
 import httpx
 
-SHIELDCLAW_URL = "http://localhost:8443"
-AUTH0_DOMAIN = "codcodingcode.ca.auth0.com"
-AUTH0_AUDIENCE = "https://shieldclaw-gateway"
+SHIELDCLAW_URL = os.getenv("SHIELDCLAW_URL", "http://localhost:8443")
+AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
+AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
 
 
 def get_token_from_args(args) -> str:

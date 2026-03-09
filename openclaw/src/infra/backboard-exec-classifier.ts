@@ -7,7 +7,7 @@
  * Creates a classifier assistant on first use and caches the ID in memory.
  */
 
-const BACKBOARD_BASE_URL = "https://app.backboard.io/api";
+const BACKBOARD_BASE_URL = process.env.BACKBOARD_BASE_URL || "";
 const CLASSIFIER_MODEL = "gemini-2.0-flash-lite-001";
 const CLASSIFIER_ASSISTANT_NAME = "openclaw-exec-classifier";
 

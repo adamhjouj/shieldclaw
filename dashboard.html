@@ -1,161 +1,722 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ShieldClaw</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/motion@12.4.5/dist/motion.js"></script>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#F7F7F8;
-  --card:#FFFFFF;
-  --border:#E5E7EB;
-  --text:#111827;
-  --text2:#6B7280;
-  --text3:#9CA3AF;
-  --low:#10B981;
-  --low-bg:#ECFDF5;
-  --med:#F59E0B;
-  --med-bg:#FFFBEB;
-  --high:#EF4444;
-  --high-bg:#FEF2F2;
-  --r:10px;
-  --shadow:0 1px 2px rgba(0,0,0,0.05);
-  --shadow-md:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);
-  --font:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
-  --mono:'JetBrains Mono',monospace;
-}
-body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;display:flex;-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShieldClaw</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.2/lib/anime.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/motion@12.4.5/dist/motion.js"></script>
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-/* ── Sidebar ── */
-.sb{width:240px;background:var(--card);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;height:100vh;position:sticky;top:0;opacity:0}
-.sb-top{padding:24px 20px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
-.sb-logo{width:8px;height:8px;border-radius:50%;background:var(--med);flex-shrink:0}
-.sb-title{font-size:14px;font-weight:600;color:var(--text)}
-.sb-sec{padding:24px 20px 8px}
-.sb-lbl{font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text3);margin-bottom:12px}
-.sb-row{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;color:var(--text2)}
-.sb-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.sb-dot.on{background:var(--low)}.sb-dot.off{background:var(--high)}
-.sb-thread{display:flex;align-items:flex-start;gap:10px;padding:8px 0;cursor:pointer;font-size:13px}
-.sb-thread:hover{opacity:.7}
-.sb-td{width:7px;height:7px;border-radius:50%;background:var(--high);margin-top:4px;flex-shrink:0}
-.sb-ti{line-height:1.5}
-.sb-tn{color:var(--text);font-weight:500;display:block}
-.sb-ts{color:var(--text3);font-size:12px}
-.sb-bottom{margin-top:auto;padding:20px;border-top:1px solid var(--border)}
-.sb-cfg{font-size:12px;color:var(--text2);padding:3px 0;line-height:1.6}
-.sb-cfg b{color:var(--text);font-weight:500}
+    :root {
+      --bg: #F7F7F8;
+      --card: #FFFFFF;
+      --border: #E5E7EB;
+      --text: #111827;
+      --text2: #6B7280;
+      --text3: #9CA3AF;
+      --low: #10B981;
+      --low-bg: #ECFDF5;
+      --med: #F59E0B;
+      --med-bg: #FFFBEB;
+      --high: #EF4444;
+      --high-bg: #FEF2F2;
+      --r: 10px;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+      --font: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
 
-/* ── Main ── */
-.main{flex:1;min-width:0;display:flex;flex-direction:column}
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: flex;
+      -webkit-font-smoothing: antialiased;
+      font-size: 14px;
+      line-height: 1.5;
+    }
 
-/* ── Stats ── */
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:24px 32px;background:var(--bg)}
-.st{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:20px;box-shadow:var(--shadow);opacity:0;transform:translateY(8px)}
-.st-val{font-size:26px;font-weight:600;letter-spacing:-0.02em;line-height:1;color:var(--text)}
-.st-lbl{font-size:12px;font-weight:500;color:var(--text3);margin-top:6px}
+    /* ── Sidebar ── */
 
-/* ── Tabs ── */
-.tabs{display:flex;gap:4px;padding:0 32px 0;background:var(--bg)}
-.tab{font-family:var(--font);font-size:13px;font-weight:500;padding:8px 16px;border-radius:8px;border:none;background:none;color:var(--text3);cursor:pointer;transition:all .15s}
-.tab.on{background:var(--card);color:var(--text);box-shadow:var(--shadow)}
-.tab:not(.on):hover{color:var(--text2)}
+    .sb {
+      width: 240px;
+      background: var(--card);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      height: 100vh;
+      position: sticky;
+      top: 0;
+      opacity: 0;
+    }
 
-/* ── Content ── */
-.content{flex:1;overflow-y:auto;padding:24px 32px 48px}
-.hidden{display:none}
+    .sb-top {
+      padding: 24px 20px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
 
-/* ── Timeline ── */
-.tl-list{display:flex;flex-direction:column;gap:2px}
-.tl{display:flex;gap:16px;padding:14px 16px;border-radius:var(--r);transition:background .1s;opacity:0}
-.tl:hover{background:var(--card)}
-.tl-time{font-family:var(--mono);font-size:12px;color:var(--text3);width:72px;flex-shrink:0;padding-top:1px}
-.tl-icon{width:6px;height:6px;border-radius:50%;margin-top:6px;flex-shrink:0}
-.tl-body{flex:1;min-width:0}
-.tl-title{font-size:14px;font-weight:500;color:var(--text);margin-bottom:2px}
-.tl-desc{font-size:13px;color:var(--text2);line-height:1.5}
-.tl-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 8px;border-radius:100px;margin-top:6px}
-.tl-badge.approved{background:var(--low-bg);color:var(--low)}
-.tl-badge.blocked{background:var(--high-bg);color:var(--high)}
-.tl-badge.needs_confirmation{background:var(--med-bg);color:var(--med)}
+    .sb-logo {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--med);
+      flex-shrink: 0;
+    }
 
-/* ── Thought ── */
-.th-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;opacity:0;transform:translateY(8px)}
-.th-head{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-.th-title{font-size:16px;font-weight:500;color:var(--text)}
-.th-sub{font-size:12px;color:var(--text3)}
-.th-body{padding:24px}
-.th-lbl{font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text3);margin-bottom:12px}
-.th-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:24px;opacity:0;transform:translateX(-8px)}
-.th-box-text{font-size:14px;color:var(--text);line-height:1.7}
-.th-steps{display:flex;flex-direction:column;gap:0;margin-bottom:24px}
-.th-step{display:flex;align-items:flex-start;gap:14px;padding:10px 0;opacity:0;transform:translateY(6px)}
-.th-sn{width:24px;height:24px;border-radius:50%;background:var(--bg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--text2);flex-shrink:0}
-.th-sc{flex:1}
-.th-st{font-size:14px;font-weight:500;color:var(--text);margin-bottom:1px}
-.th-sd{font-size:13px;color:var(--text2)}
-.th-conn{width:1px;height:8px;background:var(--border);margin-left:11px;opacity:0}
-.th-end{border-radius:8px;padding:16px 20px;opacity:0;transform:scale(.97)}
-.th-end.ok{background:var(--low-bg);border:1px solid rgba(16,185,129,.15)}
-.th-end.bad{background:var(--high-bg);border:1px solid rgba(239,68,68,.15)}
-.th-end-lbl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px}
-.th-end.ok .th-end-lbl{color:var(--low)}
-.th-end.bad .th-end-lbl{color:var(--high)}
-.th-end-text{font-size:14px;font-weight:500;color:var(--text)}
+    .sb-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
 
-.th-flow{display:flex;gap:8px;margin-top:24px}
-.th-fn{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;opacity:0;transform:scale(.9) translateY(4px);min-width:0}
-.th-fn-hd{display:flex;align-items:center;gap:6px;margin-bottom:4px}
-.th-fn-ic{width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0}
-.th-fn-t{font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase}
-.th-fn-c{font-size:11px;color:var(--text2);line-height:1.5}
-.th-fn-c code{font-family:var(--mono);font-size:10px;background:var(--card);border:1px solid var(--border);padding:1px 4px;border-radius:3px}
-.th-fn.n-in{border-left:2px solid #3B82F6}.th-fn.n-in .th-fn-ic{background:#EFF6FF;color:#3B82F6}.th-fn.n-in .th-fn-t{color:#3B82F6}
-.th-fn.n-ctx{border-left:2px solid #8B5CF6}.th-fn.n-ctx .th-fn-ic{background:#F5F3FF;color:#8B5CF6}.th-fn.n-ctx .th-fn-t{color:#8B5CF6}
-.th-fn.n-ev{border-left:2px solid var(--med)}.th-fn.n-ev .th-fn-ic{background:var(--med-bg);color:var(--med)}.th-fn.n-ev .th-fn-t{color:var(--med)}
-.th-fn.n-dec.d-approved{border-left:2px solid var(--low)}.th-fn.n-dec.d-approved .th-fn-ic{background:var(--low-bg);color:var(--low)}.th-fn.n-dec.d-approved .th-fn-t{color:var(--low)}
-.th-fn.n-dec.d-blocked{border-left:2px solid var(--high)}.th-fn.n-dec.d-blocked .th-fn-ic{background:var(--high-bg);color:var(--high)}.th-fn.n-dec.d-blocked .th-fn-t{color:var(--high)}
-.th-fn.n-dec.d-needs_confirmation{border-left:2px solid var(--med)}.th-fn.n-dec.d-needs_confirmation .th-fn-ic{background:var(--med-bg);color:var(--med)}.th-fn.n-dec.d-needs_confirmation .th-fn-t{color:var(--med)}
-.th-arr{display:flex;align-items:center;flex-shrink:0;width:16px;opacity:0}
-.th-arr svg{width:12px;height:12px;stroke:var(--border);stroke-width:2;fill:none}
+    .sb-sec {
+      padding: 24px 20px 8px;
+    }
 
-.th-reason{margin-top:20px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px 20px;opacity:0}
-.th-reason-lbl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#8B5CF6;margin-bottom:6px}
-.th-reason-txt{font-size:12px;color:var(--text2);line-height:1.7;font-family:var(--mono);white-space:pre-wrap;max-height:200px;overflow-y:auto}
+    .sb-lbl {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text3);
+      margin-bottom: 12px;
+    }
 
-/* ── Risk ── */
-.rk-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden;opacity:0;transform:translateY(8px)}
-.rk-head{padding:16px 24px;border-bottom:1px solid var(--border);font-size:16px;font-weight:500}
-.rk-body{padding:24px}
-.rk-row{display:flex;align-items:center;gap:16px;margin-bottom:16px}
-.rk-row:last-child{margin-bottom:0}
-.rk-lbl{font-size:12px;font-weight:500;color:var(--text3);width:80px;flex-shrink:0}
-.rk-track{flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden}
-.rk-fill{height:100%;border-radius:4px}
-.rk-val{font-family:var(--mono);font-size:14px;font-weight:600;width:48px;text-align:right}
-.rk-factors{display:flex;flex-direction:column;gap:10px}
-.rk-f{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2);opacity:0;transform:translateX(-4px)}
-.rk-fd{width:5px;height:5px;border-radius:50%;background:var(--med);flex-shrink:0}
-.rk-checks{display:flex;flex-direction:column;gap:10px}
-.rk-ck{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2);opacity:0;transform:translateX(-4px)}
-.rk-ci{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0}
-.rk-ci.ok{background:var(--low-bg);color:var(--low)}
-.rk-ci.no{background:var(--high-bg);color:var(--high)}
+    .sb-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 0;
+      font-size: 13px;
+      color: var(--text2);
+    }
 
-.empty{text-align:center;padding:64px 24px;color:var(--text3);font-size:14px}
+    .sb-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
 
-::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-</style>
+    .sb-dot.on  { background: var(--low); }
+    .sb-dot.off { background: var(--high); }
+
+    .sb-thread {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 0;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    .sb-thread:hover { opacity: .7; }
+
+    .sb-td {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--high);
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+
+    .sb-ti { line-height: 1.5; }
+
+    .sb-tn {
+      color: var(--text);
+      font-weight: 500;
+      display: block;
+    }
+
+    .sb-ts {
+      color: var(--text3);
+      font-size: 12px;
+    }
+
+    .sb-bottom {
+      margin-top: auto;
+      padding: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .sb-cfg {
+      font-size: 12px;
+      color: var(--text2);
+      padding: 3px 0;
+      line-height: 1.6;
+    }
+
+    .sb-cfg b {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    /* ── Main ── */
+
+    .main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Stats ── */
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      padding: 24px 32px;
+      background: var(--bg);
+    }
+
+    .st {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 20px;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    .st-val {
+      font-size: 26px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1;
+      color: var(--text);
+    }
+
+    .st-lbl {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text3);
+      margin-top: 6px;
+    }
+
+    /* ── Tabs ── */
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 0 32px 0;
+      background: var(--bg);
+    }
+
+    .tab {
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: none;
+      background: none;
+      color: var(--text3);
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .tab.on {
+      background: var(--card);
+      color: var(--text);
+      box-shadow: var(--shadow);
+    }
+
+    .tab:not(.on):hover { color: var(--text2); }
+
+    /* ── Content ── */
+
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 32px 48px;
+    }
+
+    .hidden { display: none; }
+
+    /* ── Timeline ── */
+
+    .tl-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .tl {
+      display: flex;
+      gap: 16px;
+      padding: 14px 16px;
+      border-radius: var(--r);
+      transition: background .1s;
+      opacity: 0;
+    }
+
+    .tl:hover { background: var(--card); }
+
+    .tl-time {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text3);
+      width: 72px;
+      flex-shrink: 0;
+      padding-top: 1px;
+    }
+
+    .tl-icon {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+
+    .tl-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .tl-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+
+    .tl-desc {
+      font-size: 13px;
+      color: var(--text2);
+      line-height: 1.5;
+    }
+
+    .tl-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 100px;
+      margin-top: 6px;
+    }
+
+    .tl-badge.approved           { background: var(--low-bg);  color: var(--low); }
+    .tl-badge.blocked            { background: var(--high-bg); color: var(--high); }
+    .tl-badge.needs_confirmation { background: var(--med-bg);  color: var(--med); }
+
+    /* ── Thought ── */
+
+    .th-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    .th-head {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .th-title {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .th-sub {
+      font-size: 12px;
+      color: var(--text3);
+    }
+
+    .th-body { padding: 24px; }
+
+    .th-lbl {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text3);
+      margin-bottom: 12px;
+    }
+
+    .th-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      opacity: 0;
+      transform: translateX(-8px);
+    }
+
+    .th-box-text {
+      font-size: 14px;
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    .th-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin-bottom: 24px;
+    }
+
+    .th-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 10px 0;
+      opacity: 0;
+      transform: translateY(6px);
+    }
+
+    .th-sn {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text2);
+      flex-shrink: 0;
+    }
+
+    .th-sc { flex: 1; }
+
+    .th-st {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 1px;
+    }
+
+    .th-sd {
+      font-size: 13px;
+      color: var(--text2);
+    }
+
+    .th-conn {
+      width: 1px;
+      height: 8px;
+      background: var(--border);
+      margin-left: 11px;
+      opacity: 0;
+    }
+
+    .th-end {
+      border-radius: 8px;
+      padding: 16px 20px;
+      opacity: 0;
+      transform: scale(.97);
+    }
+
+    .th-end.ok  { background: var(--low-bg);  border: 1px solid rgba(16, 185, 129, .15); }
+    .th-end.bad { background: var(--high-bg); border: 1px solid rgba(239, 68, 68, .15); }
+
+    .th-end-lbl {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+
+    .th-end.ok .th-end-lbl  { color: var(--low); }
+    .th-end.bad .th-end-lbl { color: var(--high); }
+
+    .th-end-text {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .th-flow {
+      display: flex;
+      gap: 8px;
+      margin-top: 24px;
+    }
+
+    .th-fn {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      opacity: 0;
+      transform: scale(.9) translateY(4px);
+      min-width: 0;
+    }
+
+    .th-fn-hd {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .th-fn-ic {
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      flex-shrink: 0;
+    }
+
+    .th-fn-t {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .02em;
+      text-transform: uppercase;
+    }
+
+    .th-fn-c {
+      font-size: 11px;
+      color: var(--text2);
+      line-height: 1.5;
+    }
+
+    .th-fn-c code {
+      font-family: var(--mono);
+      font-size: 10px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+
+    .th-fn.n-in  { border-left: 2px solid #3B82F6; }
+    .th-fn.n-ctx { border-left: 2px solid #8B5CF6; }
+    .th-fn.n-ev  { border-left: 2px solid var(--med); }
+
+    .th-fn.n-in .th-fn-ic  { background: #EFF6FF; color: #3B82F6; }
+    .th-fn.n-ctx .th-fn-ic { background: #F5F3FF; color: #8B5CF6; }
+    .th-fn.n-ev .th-fn-ic  { background: var(--med-bg); color: var(--med); }
+
+    .th-fn.n-in .th-fn-t  { color: #3B82F6; }
+    .th-fn.n-ctx .th-fn-t { color: #8B5CF6; }
+    .th-fn.n-ev .th-fn-t  { color: var(--med); }
+
+    .th-fn.n-dec.d-approved .th-fn-ic           { background: var(--low-bg);  color: var(--low); }
+    .th-fn.n-dec.d-approved .th-fn-t            { color: var(--low); }
+    .th-fn.n-dec.d-approved                     { border-left: 2px solid var(--low); }
+
+    .th-fn.n-dec.d-blocked .th-fn-ic            { background: var(--high-bg); color: var(--high); }
+    .th-fn.n-dec.d-blocked .th-fn-t             { color: var(--high); }
+    .th-fn.n-dec.d-blocked                      { border-left: 2px solid var(--high); }
+
+    .th-fn.n-dec.d-needs_confirmation .th-fn-ic { background: var(--med-bg);  color: var(--med); }
+    .th-fn.n-dec.d-needs_confirmation .th-fn-t  { color: var(--med); }
+    .th-fn.n-dec.d-needs_confirmation           { border-left: 2px solid var(--med); }
+
+    .th-arr {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      width: 16px;
+      opacity: 0;
+    }
+
+    .th-arr svg {
+      width: 12px;
+      height: 12px;
+      stroke: var(--border);
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .th-reason {
+      margin-top: 20px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      opacity: 0;
+    }
+
+    .th-reason-lbl {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #8B5CF6;
+      margin-bottom: 6px;
+    }
+
+    .th-reason-txt {
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.7;
+      font-family: var(--mono);
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    /* ── Risk ── */
+
+    .rk-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    .rk-head {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .rk-body { padding: 24px; }
+
+    .rk-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .rk-row:last-child { margin-bottom: 0; }
+
+    .rk-lbl {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text3);
+      width: 80px;
+      flex-shrink: 0;
+    }
+
+    .rk-track {
+      flex: 1;
+      height: 8px;
+      background: var(--bg);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .rk-fill {
+      height: 100%;
+      border-radius: 4px;
+    }
+
+    .rk-val {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 600;
+      width: 48px;
+      text-align: right;
+    }
+
+    .rk-factors {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .rk-f {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text2);
+      opacity: 0;
+      transform: translateX(-4px);
+    }
+
+    .rk-fd {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--med);
+      flex-shrink: 0;
+    }
+
+    .rk-checks {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .rk-ck {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text2);
+      opacity: 0;
+      transform: translateX(-4px);
+    }
+
+    .rk-ci {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+
+    .rk-ci.ok { background: var(--low-bg);  color: var(--low); }
+    .rk-ci.no { background: var(--high-bg); color: var(--high); }
+
+    .empty {
+      text-align: center;
+      padding: 64px 24px;
+      color: var(--text3);
+      font-size: 14px;
+    }
+
+    ::-webkit-scrollbar       { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
 </head>
 <body>
 
 <aside class="sb" id="sidebar">
-  <div class="sb-top"><div class="sb-logo"></div><div class="sb-title">ShieldClaw</div></div>
+  <div class="sb-top">
+    <div class="sb-logo"></div>
+    <div class="sb-title">ShieldClaw</div>
+  </div>
   <div class="sb-sec">
     <div class="sb-lbl">Services</div>
     <div class="sb-row"><div class="sb-dot" id="svcOC"></div>OpenClaw</div>
@@ -168,9 +729,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
   </div>
   <div class="sb-bottom">
     <div class="sb-lbl" style="margin-bottom:8px">Config</div>
-    <div class="sb-cfg">Eval mode: <b id="cfgMode">—</b></div>
-    <div class="sb-cfg">Backboard eval: <b id="cfgBBEval">—</b></div>
-    <div class="sb-cfg">Memories: <b id="cfgMem">—</b></div>
+    <div class="sb-cfg">Eval mode: <b id="cfgMode">&mdash;</b></div>
+    <div class="sb-cfg">Backboard eval: <b id="cfgBBEval">&mdash;</b></div>
+    <div class="sb-cfg">Memories: <b id="cfgMem">&mdash;</b></div>
   </div>
 </aside>
 
@@ -194,181 +755,506 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:1
 </div>
 
 <script>
-let D=[], auto=null, cur='timeline';
+let D = [];
+let auto = null;
+let cur = 'timeline';
 
-document.addEventListener('DOMContentLoaded',()=>{
-  Motion.animate('#sidebar',{opacity:[0,1],x:[-12,0]},{duration:.35,easing:'ease-out'});
-  anime({targets:'.st',opacity:[0,1],translateY:[8,0],delay:anime.stagger(50,{start:100}),duration:350,easing:'easeOutCubic'});
-  fetchLog(); loadStatus(); loadConfig();
+document.addEventListener('DOMContentLoaded', () => {
+  Motion.animate('#sidebar', { opacity: [0, 1], x: [-12, 0] }, { duration: .35, easing: 'ease-out' });
+  anime({
+    targets: '.st',
+    opacity: [0, 1],
+    translateY: [8, 0],
+    delay: anime.stagger(50, { start: 100 }),
+    duration: 350,
+    easing: 'easeOutCubic',
+  });
+  fetchLog();
+  loadStatus();
+  loadConfig();
 });
 
-function go(t){
-  cur=t;
-  document.getElementById('tabTL').classList.toggle('on',t==='timeline');
-  document.getElementById('tabTH').classList.toggle('on',t==='thought');
-  document.getElementById('tabRK').classList.toggle('on',t==='risk');
-  document.getElementById('pTL').classList.toggle('hidden',t!=='timeline');
-  document.getElementById('pTH').classList.toggle('hidden',t!=='thought');
-  document.getElementById('pRK').classList.toggle('hidden',t!=='risk');
-  if(t==='timeline')renderTL();else if(t==='thought')renderTH();else renderRK();
+function go(t) {
+  cur = t;
+  document.getElementById('tabTL').classList.toggle('on', t === 'timeline');
+  document.getElementById('tabTH').classList.toggle('on', t === 'thought');
+  document.getElementById('tabRK').classList.toggle('on', t === 'risk');
+  document.getElementById('pTL').classList.toggle('hidden', t !== 'timeline');
+  document.getElementById('pTH').classList.toggle('hidden', t !== 'thought');
+  document.getElementById('pRK').classList.toggle('hidden', t !== 'risk');
+
+  if (t === 'timeline') renderTL();
+  else if (t === 'thought') renderTH();
+  else renderRK();
 }
 
-async function fetchLog(){
-  try{const r=await fetch('/shieldclaw/backboard/log');if(!r.ok)return;const d=await r.json();D=(d.log||[]).slice().reverse();renderAll();}catch(e){console.error(e)}
-}
-async function loadStatus(){
-  try{const r=await fetch('/shieldclaw/auth0/status');if(!r.ok)return;const d=await r.json();dot('svcOC',d.openclaw.reachable);dot('svcBB',d.backboard.reachable);dot('svcSC',true);}catch(_){dot('svcSC',true)}
-}
-async function loadConfig(){
-  try{const r=await fetch('/shieldclaw/backboard/config');if(r.ok){const c=await r.json();document.getElementById('cfgMode').textContent=c.eval_mode||'—';document.getElementById('cfgBBEval').textContent=c.use_backboard?'on':'off';}}catch(_){}
-  try{const r=await fetch('/shieldclaw/backboard/status');if(r.ok){const s=await r.json();document.getElementById('cfgMem').textContent=s.memory_count!==undefined?s.memory_count:'—';}}catch(_){document.getElementById('cfgMem').textContent='—'}
-}
-function dot(id,on){const e=document.getElementById(id);e.classList.toggle('on',on);e.classList.toggle('off',!on)}
-
-function renderAll(){renderStats();renderThreads();if(cur==='timeline')renderTL();else if(cur==='thought')renderTH();else renderRK()}
-
-function renderStats(){
-  const n=D.length,a=D.filter(r=>r.status==='approved').length,avg=n?(D.reduce((s,r)=>s+(r.risk_score||0),0)/n):0;
-  const th=new Set();D.forEach(r=>{if(r.thread_id)th.add(r.thread_id);if(r.session_id)th.add(r.session_id)});
-  anim('statEvents',n);anim('statThreads',th.size);anim('statRisk',Math.round(avg*10)/10,true);
-  document.getElementById('statApproved').textContent=n?Math.round(a/n*100)+'%':'0%';
-}
-function anim(id,t,f){
-  const e=document.getElementById(id),fr=parseFloat(e.textContent)||0;
-  anime({targets:{v:fr},v:t,duration:400,easing:'easeOutExpo',round:f?10:1,update:a=>{e.textContent=f?a.animations[0].currentValue:Math.round(a.animations[0].currentValue)}});
+async function fetchLog() {
+  try {
+    const r = await fetch('/shieldclaw/backboard/log');
+    if (!r.ok) return;
+    const d = await r.json();
+    D = (d.log || []).slice().reverse();
+    renderAll();
+  } catch (e) {
+    console.error(e);
+  }
 }
 
-function renderThreads(){
-  const c=document.getElementById('threadsList'),m={};
-  D.forEach(r=>{const k=r.session_id||r.thread_id||'default';if(!m[k])m[k]={user:r.user_id||'unknown',count:0};m[k].count++});
-  const t=Object.values(m);
-  c.innerHTML=t.length?t.map(x=>`<div class="sb-thread"><div class="sb-td"></div><div class="sb-ti"><span class="sb-tn">${esc(x.user.length>18?x.user.slice(0,16)+'…':x.user)}</span><span class="sb-ts">${x.count} event${x.count!==1?'s':''}</span></div></div>`).join(''):'<div style="font-size:12px;color:var(--text3)">No threads</div>';
+async function loadStatus() {
+  try {
+    const r = await fetch('/shieldclaw/auth0/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    dot('svcOC', d.openclaw.reachable);
+    dot('svcBB', d.backboard.reachable);
+    dot('svcSC', true);
+  } catch (_) {
+    dot('svcSC', true);
+  }
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/shieldclaw/backboard/config');
+    if (r.ok) {
+      const c = await r.json();
+      document.getElementById('cfgMode').textContent = c.eval_mode || '\u2014';
+      document.getElementById('cfgBBEval').textContent = c.use_backboard ? 'on' : 'off';
+    }
+  } catch (_) {}
+
+  try {
+    const r = await fetch('/shieldclaw/backboard/status');
+    if (r.ok) {
+      const s = await r.json();
+      document.getElementById('cfgMem').textContent = s.memory_count !== undefined ? s.memory_count : '\u2014';
+    }
+  } catch (_) {
+    document.getElementById('cfgMem').textContent = '\u2014';
+  }
+}
+
+function dot(id, on) {
+  const e = document.getElementById(id);
+  e.classList.toggle('on', on);
+  e.classList.toggle('off', !on);
+}
+
+function renderAll() {
+  renderStats();
+  renderThreads();
+  if (cur === 'timeline') renderTL();
+  else if (cur === 'thought') renderTH();
+  else renderRK();
+}
+
+function renderStats() {
+  const n = D.length;
+  const a = D.filter(r => r.status === 'approved').length;
+  const avg = n ? (D.reduce((s, r) => s + (r.risk_score || 0), 0) / n) : 0;
+  const th = new Set();
+
+  D.forEach(r => {
+    if (r.thread_id) th.add(r.thread_id);
+    if (r.session_id) th.add(r.session_id);
+  });
+
+  anim('statEvents', n);
+  anim('statThreads', th.size);
+  anim('statRisk', Math.round(avg * 10) / 10, true);
+  document.getElementById('statApproved').textContent = n ? Math.round(a / n * 100) + '%' : '0%';
+}
+
+function anim(id, t, f) {
+  const e = document.getElementById(id);
+  const fr = parseFloat(e.textContent) || 0;
+  anime({
+    targets: { v: fr },
+    v: t,
+    duration: 400,
+    easing: 'easeOutExpo',
+    round: f ? 10 : 1,
+    update: a => {
+      e.textContent = f ? a.animations[0].currentValue : Math.round(a.animations[0].currentValue);
+    },
+  });
+}
+
+function renderThreads() {
+  const c = document.getElementById('threadsList');
+  const m = {};
+
+  D.forEach(r => {
+    const k = r.session_id || r.thread_id || 'default';
+    if (!m[k]) m[k] = { user: r.user_id || 'unknown', count: 0 };
+    m[k].count++;
+  });
+
+  const t = Object.values(m);
+  c.innerHTML = t.length
+    ? t.map(x =>
+        `<div class="sb-thread">` +
+          `<div class="sb-td"></div>` +
+          `<div class="sb-ti">` +
+            `<span class="sb-tn">${esc(x.user.length > 18 ? x.user.slice(0, 16) + '\u2026' : x.user)}</span>` +
+            `<span class="sb-ts">${x.count} event${x.count !== 1 ? 's' : ''}</span>` +
+          `</div>` +
+        `</div>`
+      ).join('')
+    : '<div style="font-size:12px;color:var(--text3)">No threads</div>';
 }
 
 // ── Timeline ──
-function renderTL(){
-  const p=document.getElementById('pTL');
-  if(!D.length){p.innerHTML='<div class="empty">No activity yet.</div>';return}
-  p.innerHTML='<div class="tl-list">'+D.map(e=>{
-    const t=new Date(e.timestamp).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    const sc=(e.status||'').replace(' ','_');
-    const col=e.status==='approved'?'var(--low)':e.status==='blocked'?'var(--high)':'var(--med)';
-    const sl=(e.status||'unknown').replace('_',' ');
-    const cap=sl.charAt(0).toUpperCase()+sl.slice(1);
-    const desc=e.reason||e.input_summary||'';
-    return`<div class="tl"><div class="tl-time">${t}</div><div class="tl-icon" style="background:${col}"></div><div class="tl-body"><div class="tl-title">${esc(e.action_type||'—')}</div>${desc?`<div class="tl-desc">${esc(desc)}</div>`:''}<span class="tl-badge ${sc}">${cap}</span></div></div>`;
-  }).join('')+'</div>';
-  anime({targets:'.tl',opacity:[0,1],translateX:[-6,0],delay:anime.stagger(30,{start:40}),duration:300,easing:'easeOutCubic'});
+
+function renderTL() {
+  const p = document.getElementById('pTL');
+
+  if (!D.length) {
+    p.innerHTML = '<div class="empty">No activity yet.</div>';
+    return;
+  }
+
+  p.innerHTML = '<div class="tl-list">' + D.map(e => {
+    const t = new Date(e.timestamp).toLocaleTimeString('en-US', {
+      hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const sc = (e.status || '').replace(' ', '_');
+    const col = e.status === 'approved' ? 'var(--low)'
+              : e.status === 'blocked'  ? 'var(--high)'
+              : 'var(--med)';
+    const sl = (e.status || 'unknown').replace('_', ' ');
+    const cap = sl.charAt(0).toUpperCase() + sl.slice(1);
+    const desc = e.reason || e.input_summary || '';
+
+    return `<div class="tl">` +
+      `<div class="tl-time">${t}</div>` +
+      `<div class="tl-icon" style="background:${col}"></div>` +
+      `<div class="tl-body">` +
+        `<div class="tl-title">${esc(e.action_type || '\u2014')}</div>` +
+        (desc ? `<div class="tl-desc">${esc(desc)}</div>` : '') +
+        `<span class="tl-badge ${sc}">${cap}</span>` +
+      `</div>` +
+    `</div>`;
+  }).join('') + '</div>';
+
+  anime({
+    targets: '.tl',
+    opacity: [0, 1],
+    translateX: [-6, 0],
+    delay: anime.stagger(30, { start: 40 }),
+    duration: 300,
+    easing: 'easeOutCubic',
+  });
 }
 
 // ── Thinking ──
-function renderTH(){
-  const p=document.getElementById('pTH');
-  const e=D.length?D[0]:null;
-  if(!e){p.innerHTML='<div class="empty">No evaluation data available.</div>';return}
 
-  const rk=Math.min(e.risk_score||0,100);
-  const sc=(e.status||'').replace(' ','_');
-  const icon=e.status==='approved'?'✓':e.status==='blocked'?'✗':'?';
-  const isBlocked=e.status==='blocked';
-  const factors=(e.factors||[]).map(f=>`<code>${esc(f)}</code>`).join(' ');
-  const userReq=e.input_summary||e.action_type||'User sent a request';
+function renderTH() {
+  const p = document.getElementById('pTH');
+  const e = D.length ? D[0] : null;
 
-  const steps=[];
-  if(e.action_type)steps.push({t:'Parse action',d:'Identified action type: '+e.action_type});
-  steps.push({t:'Load user context',d:'Trust tier: '+(e.trust_tier||'medium')+', User: '+(e.user_id||'unknown').slice(0,24)});
-  steps.push({t:'Run risk analysis',d:'Risk score: '+Math.round(rk)+'/100. '+(factors||'No risk factors detected.')});
-  if(e.matched_rules&&e.matched_rules.length)steps.push({t:'Match policy rules',d:e.matched_rules.join(', ')});
-  steps.push({t:'Reach decision',d:e.reason||'Decision made based on policy evaluation.'});
+  if (!e) {
+    p.innerHTML = '<div class="empty">No evaluation data available.</div>';
+    return;
+  }
 
-  p.innerHTML=`<div class="th-card" id="thCard">
-    <div class="th-head"><div class="th-title">Example 1 — ${esc(e.action_type||'Evaluation')}</div><div class="th-sub">${new Date(e.timestamp).toLocaleTimeString('en-US',{hour12:false})}</div></div>
-    <div class="th-body">
-      <div class="th-lbl">AI Thinking</div>
-      <div class="th-box" id="thBox"><div class="th-box-text">${esc(userReq)}</div></div>
-      <div class="th-lbl">Steps</div>
-      <div class="th-steps" id="thSteps">${steps.map((s,i)=>`<div class="th-step" data-s="${i}"><div class="th-sn">${i+1}</div><div class="th-sc"><div class="th-st">${esc(s.t)}</div><div class="th-sd">${esc(s.d)}</div></div></div>${i<steps.length-1?'<div class="th-conn"></div>':''}`).join('')}</div>
-      <div class="th-end ${isBlocked?'bad':'ok'}" id="thEnd"><div class="th-end-lbl">Conclusion</div><div class="th-end-text">${esc(e.reason||(isBlocked?'Action blocked by safety policy.':'Safe to proceed.'))}</div></div>
-      <div style="margin-top:32px"><div class="th-lbl">Evaluation Flow</div>
-        <div class="th-flow" id="thFlow">
-          <div class="th-fn n-in"><div class="th-fn-hd"><div class="th-fn-ic">→</div><div class="th-fn-t">Input</div></div><div class="th-fn-c">${esc(e.input_summary||e.action_type||'—')}</div></div>
-          <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
-          <div class="th-fn n-ctx"><div class="th-fn-hd"><div class="th-fn-ic">◉</div><div class="th-fn-t">Context</div></div><div class="th-fn-c">Trust: <code>${esc(e.trust_tier||'medium')}</code></div></div>
-          <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
-          <div class="th-fn n-ev"><div class="th-fn-hd"><div class="th-fn-ic">⚡</div><div class="th-fn-t">Evaluate</div></div><div class="th-fn-c">Risk: <b>${Math.round(rk)}/100</b></div></div>
-          <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
-          <div class="th-fn n-dec d-${sc}"><div class="th-fn-hd"><div class="th-fn-ic">${icon}</div><div class="th-fn-t">${esc(e.status||'—')}</div></div><div class="th-fn-c">${esc(e.reason||'—')}</div></div>
-        </div>
+  const rk = Math.min(e.risk_score || 0, 100);
+  const sc = (e.status || '').replace(' ', '_');
+  const icon = e.status === 'approved' ? '\u2713' : e.status === 'blocked' ? '\u2717' : '?';
+  const isBlocked = e.status === 'blocked';
+  const factors = (e.factors || []).map(f => `<code>${esc(f)}</code>`).join(' ');
+  const userReq = e.input_summary || e.action_type || 'User sent a request';
+
+  const steps = [];
+  if (e.action_type) steps.push({ t: 'Parse action', d: 'Identified action type: ' + e.action_type });
+  steps.push({ t: 'Load user context', d: 'Trust tier: ' + (e.trust_tier || 'medium') + ', User: ' + (e.user_id || 'unknown').slice(0, 24) });
+  steps.push({ t: 'Run risk analysis', d: 'Risk score: ' + Math.round(rk) + '/100. ' + (factors || 'No risk factors detected.') });
+  if (e.matched_rules && e.matched_rules.length) steps.push({ t: 'Match policy rules', d: e.matched_rules.join(', ') });
+  steps.push({ t: 'Reach decision', d: e.reason || 'Decision made based on policy evaluation.' });
+
+  p.innerHTML = `
+    <div class="th-card" id="thCard">
+      <div class="th-head">
+        <div class="th-title">Example 1 \u2014 ${esc(e.action_type || 'Evaluation')}</div>
+        <div class="th-sub">${new Date(e.timestamp).toLocaleTimeString('en-US', { hour12: false })}</div>
       </div>
-      ${e.reasoning?`<div class="th-reason" id="thReason"><div class="th-reason-lbl">Claude Internal Reasoning</div><div class="th-reason-txt">${esc(e.reasoning)}</div></div>`:''}
-    </div></div>`;
+      <div class="th-body">
+        <div class="th-lbl">AI Thinking</div>
+        <div class="th-box" id="thBox">
+          <div class="th-box-text">${esc(userReq)}</div>
+        </div>
 
-  anime({targets:'#thCard',opacity:[0,1],translateY:[8,0],duration:400,delay:50,easing:'easeOutCubic'});
-  Motion.animate('#thBox',{opacity:[0,1],x:[-8,0]},{duration:.45,delay:.25,easing:'ease-out'});
-  anime({targets:'.th-step',opacity:[0,1],translateY:[6,0],delay:anime.stagger(100,{start:450}),duration:350,easing:'spring(1,80,12,0)'});
-  anime({targets:'.th-conn',opacity:[0,1],delay:anime.stagger(100,{start:550}),duration:200,easing:'easeOutCubic'});
-  const cd=450+steps.length*100+150;
-  Motion.animate('#thEnd',{opacity:[0,1],scale:[.97,1]},{duration:.35,delay:cd/1000,easing:'ease-out'});
-  anime({targets:'#thFlow .th-fn',opacity:[0,1],scale:[.9,1],translateY:[4,0],delay:anime.stagger(80,{start:cd+200}),duration:380,easing:'spring(1,80,12,0)'});
-  anime({targets:'#thFlow .th-arr',opacity:[0,1],translateX:[-4,0],delay:anime.stagger(80,{start:cd+280}),duration:250,easing:'easeOutCubic'});
-  const paths=document.querySelectorAll('#thFlow .th-arr svg path');
-  paths.forEach((pa,pi)=>{const l=pa.getTotalLength?pa.getTotalLength():30;pa.style.strokeDasharray=l;pa.style.strokeDashoffset=l;Motion.animate(pa,{strokeDashoffset:[l,0]},{duration:.3,delay:(cd+320)/1000+pi*.08,easing:'ease-out'})});
-  if(document.getElementById('thReason'))Motion.animate('#thReason',{opacity:[0,1],y:[4,0]},{duration:.35,delay:(cd+700)/1000,easing:'ease-out'});
+        <div class="th-lbl">Steps</div>
+        <div class="th-steps" id="thSteps">
+          ${steps.map((s, i) =>
+            `<div class="th-step" data-s="${i}">` +
+              `<div class="th-sn">${i + 1}</div>` +
+              `<div class="th-sc">` +
+                `<div class="th-st">${esc(s.t)}</div>` +
+                `<div class="th-sd">${esc(s.d)}</div>` +
+              `</div>` +
+            `</div>` +
+            (i < steps.length - 1 ? '<div class="th-conn"></div>' : '')
+          ).join('')}
+        </div>
+
+        <div class="th-end ${isBlocked ? 'bad' : 'ok'}" id="thEnd">
+          <div class="th-end-lbl">Conclusion</div>
+          <div class="th-end-text">${esc(e.reason || (isBlocked ? 'Action blocked by safety policy.' : 'Safe to proceed.'))}</div>
+        </div>
+
+        <div style="margin-top:32px">
+          <div class="th-lbl">Evaluation Flow</div>
+          <div class="th-flow" id="thFlow">
+            <div class="th-fn n-in">
+              <div class="th-fn-hd"><div class="th-fn-ic">\u2192</div><div class="th-fn-t">Input</div></div>
+              <div class="th-fn-c">${esc(e.input_summary || e.action_type || '\u2014')}</div>
+            </div>
+            <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
+            <div class="th-fn n-ctx">
+              <div class="th-fn-hd"><div class="th-fn-ic">\u25C9</div><div class="th-fn-t">Context</div></div>
+              <div class="th-fn-c">Trust: <code>${esc(e.trust_tier || 'medium')}</code></div>
+            </div>
+            <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
+            <div class="th-fn n-ev">
+              <div class="th-fn-hd"><div class="th-fn-ic">\u26A1</div><div class="th-fn-t">Evaluate</div></div>
+              <div class="th-fn-c">Risk: <b>${Math.round(rk)}/100</b></div>
+            </div>
+            <div class="th-arr"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 5l7 7-7 7"/></svg></div>
+            <div class="th-fn n-dec d-${sc}">
+              <div class="th-fn-hd"><div class="th-fn-ic">${icon}</div><div class="th-fn-t">${esc(e.status || '\u2014')}</div></div>
+              <div class="th-fn-c">${esc(e.reason || '\u2014')}</div>
+            </div>
+          </div>
+        </div>
+
+        ${e.reasoning ? `
+          <div class="th-reason" id="thReason">
+            <div class="th-reason-lbl">Claude Internal Reasoning</div>
+            <div class="th-reason-txt">${esc(e.reasoning)}</div>
+          </div>
+        ` : ''}
+      </div>
+    </div>`;
+
+  anime({
+    targets: '#thCard',
+    opacity: [0, 1],
+    translateY: [8, 0],
+    duration: 400,
+    delay: 50,
+    easing: 'easeOutCubic',
+  });
+
+  Motion.animate('#thBox', { opacity: [0, 1], x: [-8, 0] }, { duration: .45, delay: .25, easing: 'ease-out' });
+
+  anime({
+    targets: '.th-step',
+    opacity: [0, 1],
+    translateY: [6, 0],
+    delay: anime.stagger(100, { start: 450 }),
+    duration: 350,
+    easing: 'spring(1,80,12,0)',
+  });
+
+  anime({
+    targets: '.th-conn',
+    opacity: [0, 1],
+    delay: anime.stagger(100, { start: 550 }),
+    duration: 200,
+    easing: 'easeOutCubic',
+  });
+
+  const cd = 450 + steps.length * 100 + 150;
+
+  Motion.animate('#thEnd', { opacity: [0, 1], scale: [.97, 1] }, {
+    duration: .35, delay: cd / 1000, easing: 'ease-out',
+  });
+
+  anime({
+    targets: '#thFlow .th-fn',
+    opacity: [0, 1],
+    scale: [.9, 1],
+    translateY: [4, 0],
+    delay: anime.stagger(80, { start: cd + 200 }),
+    duration: 380,
+    easing: 'spring(1,80,12,0)',
+  });
+
+  anime({
+    targets: '#thFlow .th-arr',
+    opacity: [0, 1],
+    translateX: [-4, 0],
+    delay: anime.stagger(80, { start: cd + 280 }),
+    duration: 250,
+    easing: 'easeOutCubic',
+  });
+
+  const paths = document.querySelectorAll('#thFlow .th-arr svg path');
+  paths.forEach((pa, pi) => {
+    const l = pa.getTotalLength ? pa.getTotalLength() : 30;
+    pa.style.strokeDasharray = l;
+    pa.style.strokeDashoffset = l;
+    Motion.animate(pa, { strokeDashoffset: [l, 0] }, {
+      duration: .3, delay: (cd + 320) / 1000 + pi * .08, easing: 'ease-out',
+    });
+  });
+
+  if (document.getElementById('thReason')) {
+    Motion.animate('#thReason', { opacity: [0, 1], y: [4, 0] }, {
+      duration: .35, delay: (cd + 700) / 1000, easing: 'ease-out',
+    });
+  }
 }
 
 // ── Risk ──
-function renderRK(){
-  const p=document.getElementById('pRK');
-  if(!D.length){p.innerHTML='<div class="empty">No risk data available.</div>';return}
 
-  const n=D.length,avg=D.reduce((s,r)=>s+(r.risk_score||0),0)/n,mx=Math.max(...D.map(r=>r.risk_score||0)),bl=D.filter(r=>r.status==='blocked').length;
-  const rc=s=>s<30?'var(--low)':s<65?'var(--med)':'var(--high)';
-  const br=n?Math.round(bl/n*100):0;
+function renderRK() {
+  const p = document.getElementById('pRK');
 
-  const fm={};D.forEach(r=>(r.factors||[]).forEach(f=>fm[f]=(fm[f]||0)+1));
-  const tf=Object.entries(fm).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  if (!D.length) {
+    p.innerHTML = '<div class="empty">No risk data available.</div>';
+    return;
+  }
 
-  const noErr=!D.some(r=>(r.factors||[]).includes('evaluation_error'));
-  const hasBudget=!D.some(r=>(r.factors||[]).some(f=>f.includes('budget')));
-  const hasRate=!D.some(r=>(r.factors||[]).some(f=>f.includes('rate_limit')));
+  const n = D.length;
+  const avg = D.reduce((s, r) => s + (r.risk_score || 0), 0) / n;
+  const mx = Math.max(...D.map(r => r.risk_score || 0));
+  const bl = D.filter(r => r.status === 'blocked').length;
+  const rc = s => s < 30 ? 'var(--low)' : s < 65 ? 'var(--med)' : 'var(--high)';
+  const br = n ? Math.round(bl / n * 100) : 0;
 
-  p.innerHTML=`
-    <div class="rk-card" id="rkScore"><div class="rk-head">Risk Score</div><div class="rk-body">
-      <div class="rk-row"><div class="rk-lbl">Average</div><div class="rk-track"><div class="rk-fill" id="rfA" style="width:0;background:${rc(avg)}"></div></div><div class="rk-val" style="color:${rc(avg)}" id="rvA">0</div></div>
-      <div class="rk-row"><div class="rk-lbl">Peak</div><div class="rk-track"><div class="rk-fill" id="rfM" style="width:0;background:${rc(mx)}"></div></div><div class="rk-val" style="color:${rc(mx)}" id="rvM">0</div></div>
-      <div class="rk-row"><div class="rk-lbl">Block Rate</div><div class="rk-track"><div class="rk-fill" id="rfB" style="width:0;background:var(--high)"></div></div><div class="rk-val" style="color:var(--high)" id="rvB">0%</div></div>
-    </div></div>
-    <div class="rk-card" id="rkFactors"><div class="rk-head">Risk Factors</div><div class="rk-body"><div class="rk-factors">${tf.length?tf.map(([f,c])=>`<div class="rk-f"><div class="rk-fd"></div>${esc(f)}<span style="color:var(--text3);font-size:11px;margin-left:auto">${c}×</span></div>`).join(''):'<div style="font-size:13px;color:var(--text3)">No risk factors detected</div>'}</div></div></div>
-    <div class="rk-card" id="rkChecks"><div class="rk-head">Safety Checks</div><div class="rk-body"><div class="rk-checks">
-      <div class="rk-ck"><div class="rk-ci ok">✓</div>Tool permission verified</div>
-      <div class="rk-ck"><div class="rk-ci ${hasBudget?'ok':'no'}">${hasBudget?'✓':'✗'}</div>Budget limit validated</div>
-      <div class="rk-ck"><div class="rk-ci ${hasRate?'ok':'no'}">${hasRate?'✓':'✗'}</div>Rate limit passed</div>
-      <div class="rk-ck"><div class="rk-ci ok">✓</div>Policy engine responded</div>
-      <div class="rk-ck"><div class="rk-ci ${noErr?'ok':'no'}">${noErr?'✓':'✗'}</div>No evaluation errors</div>
-      <div class="rk-ck"><div class="rk-ci ok">✓</div>Audit trail recorded</div>
-    </div></div></div>`;
+  const fm = {};
+  D.forEach(r => (r.factors || []).forEach(f => fm[f] = (fm[f] || 0) + 1));
+  const tf = Object.entries(fm).sort((a, b) => b[1] - a[1]).slice(0, 8);
 
-  anime({targets:'.rk-card',opacity:[0,1],translateY:[8,0],delay:anime.stagger(70,{start:50}),duration:380,easing:'easeOutCubic'});
-  setTimeout(()=>{
-    Motion.animate('#rfA',{width:['0%',avg+'%']},{duration:.7,delay:.2,easing:'ease-out'});
-    Motion.animate('#rfM',{width:['0%',mx+'%']},{duration:.7,delay:.3,easing:'ease-out'});
-    Motion.animate('#rfB',{width:['0%',br+'%']},{duration:.7,delay:.4,easing:'ease-out'});
-    anime({targets:{v:0},v:avg,duration:700,delay:200,easing:'easeOutExpo',round:10,update:a=>{document.getElementById('rvA').textContent=a.animations[0].currentValue}});
-    anime({targets:{v:0},v:mx,duration:700,delay:300,easing:'easeOutExpo',round:1,update:a=>{document.getElementById('rvM').textContent=Math.round(a.animations[0].currentValue)}});
-    anime({targets:{v:0},v:br,duration:700,delay:400,easing:'easeOutExpo',round:1,update:a=>{document.getElementById('rvB').textContent=Math.round(a.animations[0].currentValue)+'%'}});
-  },80);
-  anime({targets:'.rk-f',opacity:[0,1],translateX:[-4,0],delay:anime.stagger(50,{start:350}),duration:250,easing:'easeOutCubic'});
-  anime({targets:'.rk-ck',opacity:[0,1],translateX:[-4,0],delay:anime.stagger(50,{start:450}),duration:250,easing:'easeOutCubic'});
+  const noErr = !D.some(r => (r.factors || []).includes('evaluation_error'));
+  const hasBudget = !D.some(r => (r.factors || []).some(f => f.includes('budget')));
+  const hasRate = !D.some(r => (r.factors || []).some(f => f.includes('rate_limit')));
+
+  p.innerHTML = `
+    <div class="rk-card" id="rkScore">
+      <div class="rk-head">Risk Score</div>
+      <div class="rk-body">
+        <div class="rk-row">
+          <div class="rk-lbl">Average</div>
+          <div class="rk-track"><div class="rk-fill" id="rfA" style="width:0;background:${rc(avg)}"></div></div>
+          <div class="rk-val" style="color:${rc(avg)}" id="rvA">0</div>
+        </div>
+        <div class="rk-row">
+          <div class="rk-lbl">Peak</div>
+          <div class="rk-track"><div class="rk-fill" id="rfM" style="width:0;background:${rc(mx)}"></div></div>
+          <div class="rk-val" style="color:${rc(mx)}" id="rvM">0</div>
+        </div>
+        <div class="rk-row">
+          <div class="rk-lbl">Block Rate</div>
+          <div class="rk-track"><div class="rk-fill" id="rfB" style="width:0;background:var(--high)"></div></div>
+          <div class="rk-val" style="color:var(--high)" id="rvB">0%</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rk-card" id="rkFactors">
+      <div class="rk-head">Risk Factors</div>
+      <div class="rk-body">
+        <div class="rk-factors">
+          ${tf.length
+            ? tf.map(([f, c]) =>
+                `<div class="rk-f">` +
+                  `<div class="rk-fd"></div>${esc(f)}` +
+                  `<span style="color:var(--text3);font-size:11px;margin-left:auto">${c}\u00D7</span>` +
+                `</div>`
+              ).join('')
+            : '<div style="font-size:13px;color:var(--text3)">No risk factors detected</div>'
+          }
+        </div>
+      </div>
+    </div>
+
+    <div class="rk-card" id="rkChecks">
+      <div class="rk-head">Safety Checks</div>
+      <div class="rk-body">
+        <div class="rk-checks">
+          <div class="rk-ck"><div class="rk-ci ok">\u2713</div>Tool permission verified</div>
+          <div class="rk-ck"><div class="rk-ci ${hasBudget ? 'ok' : 'no'}">${hasBudget ? '\u2713' : '\u2717'}</div>Budget limit validated</div>
+          <div class="rk-ck"><div class="rk-ci ${hasRate ? 'ok' : 'no'}">${hasRate ? '\u2713' : '\u2717'}</div>Rate limit passed</div>
+          <div class="rk-ck"><div class="rk-ci ok">\u2713</div>Policy engine responded</div>
+          <div class="rk-ck"><div class="rk-ci ${noErr ? 'ok' : 'no'}">${noErr ? '\u2713' : '\u2717'}</div>No evaluation errors</div>
+          <div class="rk-ck"><div class="rk-ci ok">\u2713</div>Audit trail recorded</div>
+        </div>
+      </div>
+    </div>`;
+
+  anime({
+    targets: '.rk-card',
+    opacity: [0, 1],
+    translateY: [8, 0],
+    delay: anime.stagger(70, { start: 50 }),
+    duration: 380,
+    easing: 'easeOutCubic',
+  });
+
+  setTimeout(() => {
+    Motion.animate('#rfA', { width: ['0%', avg + '%'] }, { duration: .7, delay: .2, easing: 'ease-out' });
+    Motion.animate('#rfM', { width: ['0%', mx + '%'] },  { duration: .7, delay: .3, easing: 'ease-out' });
+    Motion.animate('#rfB', { width: ['0%', br + '%'] },  { duration: .7, delay: .4, easing: 'ease-out' });
+
+    anime({
+      targets: { v: 0 }, v: avg,
+      duration: 700, delay: 200, easing: 'easeOutExpo', round: 10,
+      update: a => { document.getElementById('rvA').textContent = a.animations[0].currentValue; },
+    });
+    anime({
+      targets: { v: 0 }, v: mx,
+      duration: 700, delay: 300, easing: 'easeOutExpo', round: 1,
+      update: a => { document.getElementById('rvM').textContent = Math.round(a.animations[0].currentValue); },
+    });
+    anime({
+      targets: { v: 0 }, v: br,
+      duration: 700, delay: 400, easing: 'easeOutExpo', round: 1,
+      update: a => { document.getElementById('rvB').textContent = Math.round(a.animations[0].currentValue) + '%'; },
+    });
+  }, 80);
+
+  anime({
+    targets: '.rk-f',
+    opacity: [0, 1],
+    translateX: [-4, 0],
+    delay: anime.stagger(50, { start: 350 }),
+    duration: 250,
+    easing: 'easeOutCubic',
+  });
+
+  anime({
+    targets: '.rk-ck',
+    opacity: [0, 1],
+    translateX: [-4, 0],
+    delay: anime.stagger(50, { start: 450 }),
+    duration: 250,
+    easing: 'easeOutCubic',
+  });
 }
 
-function toggleAuto(){
-  const b=document.getElementById('autoBtn');
-  if(auto){clearInterval(auto);auto=null}else{fetchLog();auto=setInterval(fetchLog,8000)}
+function toggleAuto() {
+  if (auto) {
+    clearInterval(auto);
+    auto = null;
+  } else {
+    fetchLog();
+    auto = setInterval(fetchLog, 8000);
+  }
 }
 
-function esc(s){if(s==null)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function esc(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
-setInterval(loadStatus,20000);
+setInterval(loadStatus, 20000);
 </script>
 </body>
 </html>

@@ -24,7 +24,7 @@ EvalMode = Literal["think", "fast"]
 # ---------------------------------------------------------------------------
 # Backboard unified API
 # ---------------------------------------------------------------------------
-BACKBOARD_BASE_URL = "https://app.backboard.io/api"
+BACKBOARD_BASE_URL = os.environ.get("BACKBOARD_BASE_URL", "")
 BACKBOARD_API_KEY = os.environ.get("BACKBOARDS_API_KEY", "")
 
 # Model identifiers as routed through Backboard

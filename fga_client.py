@@ -39,8 +39,8 @@ FGA_STORE_ID = os.getenv("FGA_STORE_ID", "")
 FGA_MODEL_ID = os.getenv("FGA_MODEL_ID", "")
 FGA_CLIENT_ID = os.getenv("FGA_CLIENT_ID", "")
 FGA_CLIENT_SECRET = os.getenv("FGA_CLIENT_SECRET", "")
-FGA_API_TOKEN_ISSUER = os.getenv("FGA_API_TOKEN_ISSUER", "fga.us.auth0.com")
-FGA_API_AUDIENCE = os.getenv("FGA_API_AUDIENCE", "https://api.us1.fga.dev/")
+FGA_API_TOKEN_ISSUER = os.getenv("FGA_API_TOKEN_ISSUER", "")
+FGA_API_AUDIENCE = os.getenv("FGA_API_AUDIENCE", "")
 
 _fga_available = bool(FGA_API_URL and FGA_STORE_ID and FGA_CLIENT_ID and FGA_CLIENT_SECRET)
 

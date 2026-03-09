@@ -17,11 +17,11 @@ import httpx
 
 load_dotenv()
 
-AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
-AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
+AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
+AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE", "")
 CLIENT_ID = os.getenv("AUTH0_CLIENT_ID")
 CLIENT_SECRET = os.getenv("AUTH0_CLIENT_SECRET")
-SHIELDCLAW = "http://localhost:8443"
+SHIELDCLAW = os.getenv("SHIELDCLAW_URL", "http://localhost:8443")
 
 
 def pretty(data: dict):

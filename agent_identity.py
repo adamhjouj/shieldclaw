@@ -19,10 +19,10 @@ from vault import vault
 
 logger = logging.getLogger("shieldclaw.agent_identity")
 
-AUTH0_DOMAIN = vault.get("AUTH0_DOMAIN", "codcodingcode.ca.auth0.com")
+AUTH0_DOMAIN = vault.get("AUTH0_DOMAIN", "")
 AUTH0_MGMT_CLIENT_ID = vault.get("AUTH0_MGMT_CLIENT_ID")
 AUTH0_MGMT_CLIENT_SECRET = vault.get("AUTH0_MGMT_CLIENT_SECRET")
-AUTH0_AUDIENCE = vault.get("AUTH0_AUDIENCE", "https://shieldclaw-gateway")
+AUTH0_AUDIENCE = vault.get("AUTH0_AUDIENCE", "")
 
 AGENT_REGISTRY_PATH = Path("agent_registry.json")
 

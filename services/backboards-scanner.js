@@ -80,7 +80,7 @@ async function logToBackboard(threadId, content, memory = 'Auto') {
   const apiKey = process.env.BACKBOARDS_API_KEY;
   if (!apiKey) throw new Error('BACKBOARDS_API_KEY is not set');
 
-  const baseUrl = process.env.BACKBOARD_BASE_URL || 'https://app.backboard.io/api';
+  const baseUrl = process.env.BACKBOARD_BASE_URL || '';
 
   const res = await fetch(`${baseUrl}/threads/${threadId}/messages`, {
     method: 'POST',
